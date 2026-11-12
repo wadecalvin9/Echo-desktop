@@ -4360,10 +4360,21 @@ impl EchoApp {
             body_row = body_row.push(self.view_right_rail());
         }
 
+        let main_content = container(
+            column![self.view_top_bar(), body_row].spacing(8),
+        )
+        .padding(iced::Padding {
+            top: 8.0,
+            right: 8.0,
+            bottom: 4.0,
+            left: 8.0,
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
+
         let base = container(
-            column![self.view_top_bar(), body_row, self.view_player_dock()]
-                .spacing(8)
-                .padding(8)
+            column![main_content, self.view_player_dock()]
+                .spacing(0)
                 .height(Length::Fill),
         )
         .width(Length::Fill)
@@ -9395,7 +9406,6 @@ impl EchoApp {
                     if liked { "Remove from Liked" } else { "Save to Liked Songs" },
                     tooltip::Position::Top,
                 ),
-                horizontal_space(),
             ]
             .spacing(10)
             .align_y(Alignment::Center)
@@ -9407,7 +9417,8 @@ impl EchoApp {
                     text(artist).size(12).wrapping(Wrapping::None).color(muted),
                 ]
                 .spacing(3)
-                .width(Length::Fill),
+                .max_width(210)
+                .clip(true),
             ]
             .spacing(12)
             .align_y(Alignment::Center)
@@ -9644,20 +9655,35 @@ impl EchoApp {
                 tooltip::Position::Top,
             ));
 
+        let dock_content = row![
+            container(now_playing).width(Length::Shrink),
+            container(center)
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center),
+            container(right)
+                .width(Length::Shrink)
+                .align_x(iced::alignment::Horizontal::Right),
+        ]
+        .spacing(16)
+        .align_y(Alignment::Center);
+
         container(
-            row![
-                container(now_playing).width(Length::FillPortion(3)),
-                container(center)
-                    .width(Length::FillPortion(4))
-                    .align_x(iced::alignment::Horizontal::Center),
-                container(right)
-                    .width(Length::FillPortion(3))
-                    .align_x(iced::alignment::Horizontal::Right),
+            column![
+                container(horizontal_space())
+                    .width(Length::Fill)
+                    .height(1)
+                    .style(divider_style(0.06)),
+                container(dock_content)
+                    .padding(iced::Padding {
+                        top: 8.0,
+                        right: 18.0,
+                        bottom: 10.0,
+                        left: 18.0,
+                    })
+                    .width(Length::Fill),
             ]
-            .spacing(16)
-            .align_y(Alignment::Center),
         )
-        .padding([9, 14])
+        .width(Length::Fill)
         .style(player_dock_style(p))
         .into()
     }
@@ -10280,8 +10306,7 @@ impl EchoApp {
         }
         container(bars)
             .width(Length::Fill)
-            .padding([4, 12])
-            .style(badge_pill_style(self.palette))
+            .padding([2, 4])
             .into()
     }
 
@@ -10478,7 +10503,7 @@ impl EchoApp {
 
         let muted_audio = self.settings.volume <= 0.01;
         let vol_pct = (self.settings.volume * 100.0).round() as u32;
-        let volume_row = row![
+        let compact_volume = row![
             button(icons::icon(
                 if muted_audio { icons::VOLUME_MUTED } else { icons::VOLUME },
                 14.0,
@@ -10490,14 +10515,32 @@ impl EchoApp {
             slider(0.0..=2.0, self.settings.volume, Message::VolumeChanged)
                 .step(0.05_f32)
                 .style(slim_slider_style(Color::WHITE, accent))
-                .width(Length::Fill),
+                .width(80),
             text(format!("{vol_pct}%"))
                 .size(10)
                 .font(mono())
                 .color(Color::from_rgba(1.0, 1.0, 1.0, 0.60)),
         ]
-        .spacing(6)
+        .spacing(4)
         .align_y(Alignment::Center);
+
+        let utility_row = row![
+            compact_volume,
+            horizontal_space(),
+            row![
+                container(text(loudness_text.clone()).size(9).font(mono()))
+                    .padding([2, 6])
+                    .style(badge_pill_style(p)),
+                container(text(quality_badge_label).size(9).font(mono()))
+                    .padding([2, 6])
+                    .style(badge_pill_style(p)),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .width(Length::Fill);
 
         let is_queue = self.right_tab == RightTab::Queue;
         let tab_row = row![
@@ -10756,23 +10799,13 @@ impl EchoApp {
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),
-                row![
-                    container(text(loudness_text.clone()).size(10).font(mono()))
-                        .padding([2, 7])
-                        .style(badge_pill_style(p)),
-                    container(text(quality_badge_label).size(10).font(mono()))
-                        .padding([2, 7])
-                        .style(badge_pill_style(p)),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
-                vertical_space().height(4),
+                vertical_space().height(2),
+                make_timeline(self.duration_ms, self.position_ms, self.seeking_ms, accent),
                 container(make_full_controls(is_playing, p, accent, self.queue.repeat_mode, self.queue.shuffle))
                     .width(Length::Fill)
                     .align_x(iced::alignment::Horizontal::Center),
-                make_timeline(self.duration_ms, self.position_ms, self.seeking_ms, accent),
-                volume_row,
-                vertical_space().height(4),
+                utility_row,
+                vertical_space().height(2),
                 self.live_spectrum_strip(accent),
             ]
             .spacing(6)

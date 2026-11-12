@@ -479,15 +479,11 @@ pub fn hero_banner_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Sty
 /// The player dock blends seamlessly into the app backdrop with subtle depth.
 pub fn player_dock_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
-        let base = color_from_rgb(p.surface.lerp(p.background, 0.52));
+        let base = color_from_rgb(p.surface.lerp(p.background, 0.42));
         container::Style {
             background: Some(Background::Color(base)),
             text_color: Some(color_from_rgb(p.text)),
-            border: Border {
-                radius: 14.0.into(),
-                width: 1.0,
-                color: white(0.045),
-            },
+            border: Border::default(),
             ..Default::default()
         }
     }
