@@ -537,28 +537,7 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         ]
         .align_y(Alignment::Center);
 
-        let filter_pill = |label: &'static str, f: LibraryFilter| -> Element<'_, Message> {
-            let active = self.library_filter == f;
-            button(text(label).size(11))
-                .padding([4, 9])
-                .style(top_pill_button_style(p, active))
-                .on_press(Message::LibraryFilterSelected(f))
-                .into()
-        };
-        let filter_row_1 = row![
-            filter_pill("Songs", LibraryFilter::Songs),
-            filter_pill("Artists", LibraryFilter::Artists),
-            filter_pill("Albums", LibraryFilter::Albums),
-        ]
-        .spacing(4);
-        let filter_row_2 = row![
-            filter_pill("Playlists", LibraryFilter::Playlists),
-            filter_pill("Downloads", LibraryFilter::Downloads),
-            filter_pill("Local", LibraryFilter::Local),
-        ]
-        .spacing(4);
-
-        let mut list = column![filter_row_1, filter_row_2, vertical_space().height(6)].spacing(4);
+        let mut list = column![].spacing(4);
 
         if self.show_new_playlist_input {
             list = list.push(

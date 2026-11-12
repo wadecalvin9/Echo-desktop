@@ -258,12 +258,12 @@ impl EchoApp {
         let excluded_folders_input = settings.excluded_media_folders.join("; ");
 
         let mut app = Self {
-            tab: NavTab::Settings,
+            tab: NavTab::Home,
             library_tab: LibraryTab::Liked,
             library_filter: LibraryFilter::All,
             right_tab: RightTab::Now,
-            left_collapsed: false,
-            show_right_rail: true,
+            left_collapsed: true,
+            show_right_rail: false,
             show_new_playlist_input: false,
             show_expanded: false,
             hovered_card: None,
