@@ -67,6 +67,92 @@ pub fn elevated_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::S
     }
 }
 
+pub fn settings_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let base = color_from_rgb(p.surface_elevated);
+        container::Style {
+            background: Some(Background::Color(base)),
+            text_color: Some(color_from_rgb(p.text)),
+            border: Border {
+                color: white(0.06),
+                width: 1.0,
+                radius: 12.0.into(),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.20),
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 8.0,
+            },
+        }
+    }
+}
+
+pub fn card_icon_badge_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let accent = color_from_rgb(p.primary);
+        container::Style {
+            background: Some(Background::Color(with_alpha(accent, 0.14))),
+            text_color: Some(accent),
+            border: Border {
+                color: with_alpha(accent, 0.28),
+                width: 1.0,
+                radius: 9.0.into(),
+            },
+            ..Default::default()
+        }
+    }
+}
+
+pub fn eq_band_strip_style(_p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(white(0.035))),
+        border: Border {
+            color: white(0.05),
+            width: 1.0,
+            radius: 8.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub fn segmented_pill_style(_p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(white(0.05))),
+        border: Border {
+            color: white(0.08),
+            width: 1.0,
+            radius: 999.0.into(),
+        },
+        ..Default::default()
+    }
+}
+
+pub fn nav_tab_badge_style(p: DynamicPalette, active: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        if active {
+            container::Style {
+                background: Some(Background::Color(Color::from_rgba(0.0, 0.0, 0.0, 0.18))),
+                text_color: Some(Color::BLACK),
+                border: Border {
+                    radius: 999.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        } else {
+            container::Style {
+                background: Some(Background::Color(white(0.08))),
+                text_color: Some(color_from_rgb(p.text_muted)),
+                border: Border {
+                    radius: 999.0.into(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }
+        }
+    }
+}
+
 pub fn bento_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
         let top = color_from_rgb(p.surface_elevated.lerp(p.tint, 0.25));
