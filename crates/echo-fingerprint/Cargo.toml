@@ -1,0 +1,19 @@
+[package]
+name = "echo-fingerprint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+base64.workspace = true
+chrono.workspace = true
+cpal.workspace = true
+crc32fast.workspace = true
+echo-core.workspace = true
+reqwest.workspace = true
+rustfft.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+

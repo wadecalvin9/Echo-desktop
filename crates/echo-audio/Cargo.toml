@@ -1,0 +1,17 @@
+[package]
+name = "echo-audio"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cpal.workspace = true
+echo-core.workspace = true
+echo-youtube.workspace = true
+reqwest = { workspace = true, features = ["blocking"] }
+symphonia.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

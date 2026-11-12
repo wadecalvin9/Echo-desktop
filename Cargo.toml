@@ -1,0 +1,56 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/echo-core",
+    "crates/echo-fingerprint",
+    "crates/echo-lyrics",
+    "crates/echo-lastfm",
+    "crates/echo-youtube",
+    "crates/echo-audio",
+    "crates/echo-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-or-later"
+authors = ["Echo Desktop Contributors"]
+
+[workspace.dependencies]
+anyhow = "1"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+cpal = "0.15"
+crc32fast = "1"
+directories = "5"
+iced = { version = "0.13", features = ["tokio", "image", "advanced", "svg", "lazy"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
+lofty = "0.22"
+md-5 = "0.10"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["default-tls", "json", "gzip", "deflate", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+rustfft = "6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha1 = "0.10"
+souvlaki = "0.8"
+symphonia = { version = "0.5", features = ["aac", "mp3", "flac", "ogg", "vorbis", "pcm", "isomp4", "mkv"] }
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+urlencoding = "2"
+uuid = { version = "1", features = ["v4"] }
+
+echo-core = { path = "crates/echo-core" }
+echo-fingerprint = { path = "crates/echo-fingerprint" }
+echo-lyrics = { path = "crates/echo-lyrics" }
+echo-lastfm = { path = "crates/echo-lastfm" }
+echo-youtube = { path = "crates/echo-youtube" }
+echo-audio = { path = "crates/echo-audio" }
+
+# Keep dependencies fast in dev builds (prevents sluggish software/image/audio paths under cargo run).
+[profile.dev.package."*"]
+opt-level = 2
+

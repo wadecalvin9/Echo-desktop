@@ -1,0 +1,22 @@
+[package]
+name = "echo-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+chrono.workspace = true
+echo-audio.workspace = true
+echo-core.workspace = true
+echo-fingerprint.workspace = true
+echo-lastfm.workspace = true
+echo-lyrics.workspace = true
+echo-youtube.workspace = true
+iced.workspace = true
+image.workspace = true
+reqwest.workspace = true
+souvlaki.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
