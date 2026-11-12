@@ -538,19 +538,37 @@ pub fn pager_button_style(
 
 pub fn logo_badge_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
-        let _ = p;
+        let accent = color_from_rgb(p.primary);
         container::Style {
-            background: Some(Background::Color(Color::from_rgb(0.04, 0.04, 0.05))),
-            text_color: Some(Color::WHITE),
+            background: Some(Background::Color(accent)),
+            text_color: Some(Color::BLACK),
             border: Border {
-                radius: 7.0.into(),
-                width: 1.0,
-                color: Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+                radius: 8.0.into(),
+                ..Default::default()
             },
             shadow: Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
-                offset: Vector::new(0.0, 2.0),
-                blur_radius: 6.0,
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.40),
+                offset: Vector::new(0.0, 3.0),
+                blur_radius: 10.0,
+            },
+        }
+    }
+}
+
+pub fn card_play_fab_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let accent = color_from_rgb(p.primary);
+        container::Style {
+            background: Some(Background::Color(accent)),
+            text_color: Some(Color::BLACK),
+            border: Border {
+                radius: 999.0.into(),
+                ..Default::default()
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.50),
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 12.0,
             },
         }
     }

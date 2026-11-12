@@ -6,7 +6,7 @@ mod theme;
 use crate::theme::{
     account_badge_style, ambient_scrim_style, app_shell_style, artwork_frame_style,
     badge_pill_style, bare_input_style, bento_card_style, blurred_image_handle, card_button_style,
-    card_hover_scrim_style, color_from_rgb, divider_style, dock_play_button_style,
+    card_hover_scrim_style, card_play_fab_style, color_from_rgb, divider_style, dock_play_button_style,
     downloads_badge_style, elevated_card_style, expanded_stage_style, ghost_row_button_style,
     glass_panel_style, glowing_play_button_style, hero_banner_style, icon_button_style,
     liked_gradient_badge_style, local_badge_style, logo_badge_style, outlined_pill_button_style,
@@ -4611,7 +4611,7 @@ impl EchoApp {
         let can_fwd = !self.nav_forward.is_empty();
 
         let mut nav_arrows = row![
-            container(icons::icon(icons::ECHO_MARK, 16.0, Color::WHITE))
+            container(icons::icon(icons::ECHO_MARK, 16.0, Color::BLACK))
                 .width(28)
                 .height(28)
                 .align_x(iced::alignment::Horizontal::Center)
@@ -9872,16 +9872,16 @@ impl EchoApp {
                 .height(148)
                 .style(card_hover_scrim_style(if is_artist { 74.0 } else { 10.0 }));
             let play_fab = container(
-                container(icons::icon(icons::PLAY, 18.0, Color::BLACK))
-                    .width(42)
-                    .height(42)
+                container(icons::icon(icons::PLAY, 16.0, Color::BLACK))
+                    .width(38)
+                    .height(38)
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center)
-                    .style(logo_badge_style(p)),
+                    .style(card_play_fab_style(p)),
             )
             .width(148)
             .height(148)
-            .padding(8)
+            .padding(10)
             .align_x(iced::alignment::Horizontal::Right)
             .align_y(iced::alignment::Vertical::Bottom);
             stack![art_base, scrim, play_fab].into()
@@ -10588,7 +10588,7 @@ impl EchoApp {
             // Ultra-compact floating mini player
             let drag_header = mouse_area(
                 row![
-                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::WHITE))
+                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::BLACK))
                         .width(20)
                         .height(20)
                         .align_x(iced::alignment::Horizontal::Center)
@@ -10722,7 +10722,7 @@ impl EchoApp {
             // Fullscreen or wide split dock
             let drag_header = mouse_area(
                 row![
-                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::WHITE))
+                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::BLACK))
                         .width(20)
                         .height(20)
                         .align_x(iced::alignment::Horizontal::Center)
@@ -10851,7 +10851,7 @@ impl EchoApp {
             // Narrow vertical sidebar dock (e.g. snapped to side on a narrow column)
             let drag_header = mouse_area(
                 row![
-                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::WHITE))
+                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::BLACK))
                         .width(20)
                         .height(20)
                         .align_x(iced::alignment::Horizontal::Center)
