@@ -1,8 +1,10 @@
 pub mod adaptive_queue;
 pub mod backup;
 pub mod cache;
+pub mod cast;
 pub mod db;
 pub mod downloads;
+pub mod importer;
 pub mod local_media;
 pub mod models;
 pub mod recommendations;
@@ -18,6 +20,7 @@ pub use recommendations::{
     EngineOutput, ListenRecord, RelatedEdge,
 };
 pub use backup::{default_backup_path, export_backup, validate_and_unpack_backup, BackupError};
+pub use cast::{discover_ssdp_devices, parse_cast_address, CastDevice, CastProtocol};
 pub use cache::{
     cache_stats, clear_cache_dir, enforce_lru_limit, lookup_cached_stream, store_cached_stream,
 };
@@ -26,9 +29,10 @@ pub use downloads::{
     download_file_path, extension_for_mime, extract_youtube_id_from_filename,
     migrate_download_file, sanitize_filename, scan_download_folders,
 };
+pub use importer::{import_playlist_file, parse_apple_music_xml, parse_csv, parse_m3u, ImportedPlaylist, ImportedTrack};
 pub use local_media::{
-    group_tracks_by_folder, parse_r128_gain_db, parse_replaygain_db, scan_local_folders,
-    LocalMediaScanConfig,
+    extract_embedded_lyrics, group_tracks_by_folder, parse_r128_gain_db, parse_replaygain_db,
+    scan_local_folders, tag_audio_file, LocalMediaScanConfig,
 };
 pub use models::{
     AlbumRef, AlbumStats, ArtistRef, ArtistStats, AudioQuality, DailyListening, ListeningSummary,
@@ -36,7 +40,7 @@ pub use models::{
     TrackStats,
 };
 pub use settings::{
-    AppSettings, EqPreset, RecognitionSource, ScannerSensitivity, SettingsError, SpatialMode,
+    AppSettings, AutoEqProfile, EqPreset, RecognitionSource, ScannerSensitivity, SettingsError, SpatialMode,
     ThemeMode,
 };
 pub use theme::{DynamicPalette, RgbColor, ACCENT};

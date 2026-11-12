@@ -61,6 +61,7 @@ enum Command {
     Resume,
     Stop,
     Seek(u64),
+    SetDevice(Option<String>),
 }
 
 struct SharedState {
@@ -73,6 +74,8 @@ struct SharedState {
     normalization_enabled: AtomicBool,
     skip_silence: AtomicBool,
     dsp_config: Mutex<(EqPreset, SpatialMode)>,
+    custom_eq_bands: Mutex<[f32; 10]>,
+    playback_speed_bits: AtomicU64,
     dsp_generation: AtomicU64,
     loudness_db: Mutex<Option<f32>>,
     is_local: AtomicBool,
@@ -97,6 +100,8 @@ impl SharedState {
             normalization_enabled: AtomicBool::new(normalization_enabled),
             skip_silence: AtomicBool::new(false),
             dsp_config: Mutex::new((EqPreset::Flat, SpatialMode::Off)),
+            custom_eq_bands: Mutex::new(EqPreset::Flat.gains_db()),
+            playback_speed_bits: AtomicU64::new((1.0f64).to_bits()),
             dsp_generation: AtomicU64::new(0),
             loudness_db: Mutex::new(None),
             is_local: AtomicBool::new(false),
@@ -187,7 +192,33 @@ impl AudioEngine {
 
     pub fn set_dsp(&self, eq_preset: EqPreset, spatial_mode: SpatialMode) {
         *self.shared.dsp_config.lock().expect("dsp_config") = (eq_preset, spatial_mode);
+        *self.shared.custom_eq_bands.lock().expect("custom_eq") = eq_preset.gains_db();
         self.shared.dsp_generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn set_eq_bands(&self, bands: [f32; 10]) {
+        *self.shared.custom_eq_bands.lock().expect("custom_eq") = bands;
+        self.shared.dsp_generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn set_spatial(&self, spatial_mode: SpatialMode) {
+        self.shared.dsp_config.lock().expect("dsp_config").1 = spatial_mode;
+        self.shared.dsp_generation.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn set_playback_speed(&self, speed: f32) {
+        let s = speed.clamp(0.5, 2.0);
+        self.shared
+            .playback_speed_bits
+            .store((s as f64).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn playback_speed(&self) -> f32 {
+        f64::from_bits(self.shared.playback_speed_bits.load(Ordering::Relaxed)) as f32
+    }
+
+    pub fn set_output_device(&self, device_name: Option<String>) {
+        let _ = self.tx.send(Command::SetDevice(device_name));
     }
 
     pub fn set_normalization(&self, enabled: bool, loudness_db: Option<f32>, is_local: bool) {
@@ -305,83 +336,108 @@ fn open_decoder(spec: &AudioSourceSpec) -> Result<ActiveDecoder, String> {
     })
 }
 
-fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
+pub fn available_output_devices() -> Vec<String> {
     let host = cpal::default_host();
-    let output_device = host.default_output_device();
-    let (out_rate, out_channels, _stream) = match output_device {
-        Some(dev) => match dev.default_output_config() {
-            Ok(cfg) => {
-                let rate = cfg.sample_rate().0;
-                let channels = cfg.channels() as usize;
-                let fmt = cfg.sample_format();
-                let stream_cfg = cfg.into();
-                let stream_shared = Arc::clone(&shared);
-                let stream = match fmt {
-                    SampleFormat::F32 => dev.build_output_stream(
-                        &stream_cfg,
-                        move |data: &mut [f32], _| fill_output_f32(&stream_shared, data),
-                        |err| tracing::warn!("cpal output error: {err}"),
-                        None,
-                    ),
-                    SampleFormat::I16 => dev.build_output_stream(
-                        &stream_cfg,
-                        move |data: &mut [i16], _| {
-                            let mut tmp = vec![0.0f32; data.len()];
-                            fill_output_f32(&stream_shared, &mut tmp);
-                            for (dst, src) in data.iter_mut().zip(tmp) {
-                                *dst = (src.clamp(-1.0, 1.0) * 32767.0) as i16;
-                            }
-                        },
-                        |err| tracing::warn!("cpal output error: {err}"),
-                        None,
-                    ),
-                    SampleFormat::U16 => dev.build_output_stream(
-                        &stream_cfg,
-                        move |data: &mut [u16], _| {
-                            let mut tmp = vec![0.0f32; data.len()];
-                            fill_output_f32(&stream_shared, &mut tmp);
-                            for (dst, src) in data.iter_mut().zip(tmp) {
-                                *dst = ((src.clamp(-1.0, 1.0) * 32767.0) + 32768.0) as u16;
-                            }
-                        },
-                        |err| tracing::warn!("cpal output error: {err}"),
-                        None,
-                    ),
-                    other => {
-                        *shared.status.lock().expect("status") =
-                            PlaybackStatus::Error(format!("unsupported sample format {other:?}"));
-                        return;
-                    }
-                };
-                match stream {
-                    Ok(s) => {
-                        let _ = s.play();
-                        (rate, channels, Some(s))
-                    }
-                    Err(e) => {
-                        *shared.status.lock().expect("status") =
-                            PlaybackStatus::Error(format!("audio stream error: {e}"));
-                        return;
+    let mut names = Vec::new();
+    if let Ok(devices) = host.output_devices() {
+        for dev in devices {
+            if let Ok(name) = dev.name() {
+                if !names.contains(&name) {
+                    names.push(name);
+                }
+            }
+        }
+    }
+    names
+}
+
+fn build_output_stream(
+    host: &cpal::Host,
+    device_name: Option<&str>,
+    shared: &Arc<SharedState>,
+) -> Result<(u32, usize, cpal::Stream), String> {
+    let dev = if let Some(target) = device_name {
+        let mut found = None;
+        if let Ok(devices) = host.output_devices() {
+            for d in devices {
+                if let Ok(name) = d.name() {
+                    if name == target {
+                        found = Some(d);
+                        break;
                     }
                 }
             }
+        }
+        found.or_else(|| host.default_output_device())
+    } else {
+        host.default_output_device()
+    }
+    .ok_or_else(|| "no output audio device".to_string())?;
+
+    let cfg = dev
+        .default_output_config()
+        .map_err(|e| format!("audio config error: {e}"))?;
+    let rate = cfg.sample_rate().0;
+    let channels = cfg.channels() as usize;
+    let fmt = cfg.sample_format();
+    let stream_cfg = cfg.into();
+    let stream_shared = Arc::clone(shared);
+    let stream = match fmt {
+        SampleFormat::F32 => dev.build_output_stream(
+            &stream_cfg,
+            move |data: &mut [f32], _| fill_output_f32(&stream_shared, data),
+            |err| tracing::warn!("cpal output error: {err}"),
+            None,
+        ),
+        SampleFormat::I16 => dev.build_output_stream(
+            &stream_cfg,
+            move |data: &mut [i16], _| {
+                let mut tmp = vec![0.0f32; data.len()];
+                fill_output_f32(&stream_shared, &mut tmp);
+                for (dst, src) in data.iter_mut().zip(tmp) {
+                    *dst = (src.clamp(-1.0, 1.0) * 32767.0) as i16;
+                }
+            },
+            |err| tracing::warn!("cpal output error: {err}"),
+            None,
+        ),
+        SampleFormat::U16 => dev.build_output_stream(
+            &stream_cfg,
+            move |data: &mut [u16], _| {
+                let mut tmp = vec![0.0f32; data.len()];
+                fill_output_f32(&stream_shared, &mut tmp);
+                for (dst, src) in data.iter_mut().zip(tmp) {
+                    *dst = ((src.clamp(-1.0, 1.0) * 32767.0) + 32768.0) as u16;
+                }
+            },
+            |err| tracing::warn!("cpal output error: {err}"),
+            None,
+        ),
+        other => {
+            return Err(format!("unsupported sample format {other:?}"));
+        }
+    }
+    .map_err(|e| format!("audio stream error: {e}"))?;
+
+    let _ = stream.play();
+    Ok((rate, channels, stream))
+}
+
+fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
+    let host = cpal::default_host();
+    let (mut out_rate, mut out_channels, mut _stream) =
+        match build_output_stream(&host, None, &shared) {
+            Ok((r, ch, s)) => (r, ch, Some(s)),
             Err(e) => {
-                *shared.status.lock().expect("status") =
-                    PlaybackStatus::Error(format!("audio config error: {e}"));
+                *shared.status.lock().expect("status") = PlaybackStatus::Error(e);
                 return;
             }
-        },
-        None => {
-            *shared.status.lock().expect("status") =
-                PlaybackStatus::Error("no output audio device".to_string());
-            return;
-        }
-    };
+        };
 
     let mut active: Option<ActiveDecoder> = None;
     shared.out_rate.store(out_rate as u64, Ordering::Relaxed);
     shared.out_channels.store(out_channels as u64, Ordering::Relaxed);
-    let max_ring_samples = (out_rate as usize) * out_channels / 2; // ~500 ms buffer
+    let mut max_ring_samples = (out_rate as usize) * out_channels / 2; // ~500 ms buffer
     let (init_eq, init_spatial) = *shared.dsp_config.lock().expect("dsp_config");
     let mut seen_dsp_gen = shared.dsp_generation.load(Ordering::Relaxed);
     let mut equalizer = Equalizer::new(out_rate, out_channels, init_eq);
@@ -478,6 +534,25 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
                         }
                     }
                 }
+                Command::SetDevice(dev_name) => {
+                    match build_output_stream(&host, dev_name.as_deref(), &shared) {
+                        Ok((rate, channels, s)) => {
+                            out_rate = rate;
+                            out_channels = channels;
+                            _stream = Some(s);
+                            max_ring_samples = (out_rate as usize) * out_channels / 2;
+                            shared.out_rate.store(out_rate as u64, Ordering::Relaxed);
+                            shared.out_channels.store(out_channels as u64, Ordering::Relaxed);
+                            let custom_bands = *shared.custom_eq_bands.lock().expect("custom_eq");
+                            let (_, sp_mode) = *shared.dsp_config.lock().expect("dsp");
+                            equalizer.configure_bands(out_rate, out_channels, custom_bands);
+                            spatial.configure(out_rate, sp_mode);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to switch output device to {dev_name:?}: {e}");
+                        }
+                    }
+                }
             }
             continue;
         }
@@ -523,9 +598,11 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
                             *buf = SampleBuffer::<f32>::new(frames as u64, spec);
                         }
                         buf.copy_interleaved_ref(decoded);
+                        let speed = f64::from_bits(shared.playback_speed_bits.load(Ordering::Relaxed)) as f32;
+                        let eff_src_rate = ((src_rate as f32) * speed.clamp(0.5, 2.0)).round().max(1000.0) as u32;
                         let mut resampled = resample_and_remix(
                             buf.samples(),
-                            src_rate,
+                            eff_src_rate,
                             src_ch,
                             out_rate,
                             out_channels,
@@ -537,8 +614,9 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
                         }
                         let cur_gen = shared.dsp_generation.load(Ordering::Relaxed);
                         if cur_gen != seen_dsp_gen {
-                            let (eq_preset, sp_mode) = *shared.dsp_config.lock().expect("dsp");
-                            equalizer.configure(out_rate, out_channels, eq_preset);
+                            let (_, sp_mode) = *shared.dsp_config.lock().expect("dsp");
+                            let custom_bands = *shared.custom_eq_bands.lock().expect("custom_eq");
+                            equalizer.configure_bands(out_rate, out_channels, custom_bands);
                             spatial.configure(out_rate, sp_mode);
                             seen_dsp_gen = cur_gen;
                         }

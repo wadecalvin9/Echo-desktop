@@ -88,9 +88,8 @@ impl Equalizer {
         eq
     }
 
-    pub fn configure(&mut self, sample_rate: u32, channels: usize, preset: EqPreset) {
-        let gains = preset.gains_db();
-        self.active = preset != EqPreset::Flat && gains.iter().any(|g| g.abs() >= 0.05);
+    pub fn configure_bands(&mut self, sample_rate: u32, channels: usize, gains: [f32; 10]) {
+        self.active = gains.iter().any(|g| g.abs() >= 0.05);
         if self.states.len() != channels.max(1) {
             self.states = vec![[BiquadState::default(); 10]; channels.max(1)];
         }
@@ -98,6 +97,10 @@ impl Equalizer {
         for (i, &freq) in EQ_BANDS_HZ.iter().enumerate() {
             self.coeffs[i] = BiquadCoeffs::peaking(sr, freq, 1.41, gains[i]);
         }
+    }
+
+    pub fn configure(&mut self, sample_rate: u32, channels: usize, preset: EqPreset) {
+        self.configure_bands(sample_rate, channels, preset.gains_db());
     }
 
     pub fn reset(&mut self) {

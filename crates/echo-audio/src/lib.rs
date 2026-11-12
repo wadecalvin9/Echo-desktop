@@ -4,7 +4,9 @@ pub mod normalization;
 pub mod source;
 
 pub use dsp::{is_silent_packet, Equalizer, SpatialProcessor, EQ_BANDS_HZ};
-pub use engine::{AudioEngine, AudioSourceSpec, PlaybackSnapshot, PlaybackStatus};
+pub use engine::{
+    available_output_devices, AudioEngine, AudioSourceSpec, PlaybackSnapshot, PlaybackStatus,
+};
 pub use normalization::{
     apply_gain_and_soft_limit, compute_normalization_gain, NORMALIZATION_REFERENCE_DB,
     UNKNOWN_LOUDNESS_DB,

@@ -263,3 +263,81 @@ pub fn group_tracks_by_folder(tracks: &[Track]) -> BTreeMap<String, Vec<Track>> 
     }
     map
 }
+
+/// Extracts embedded lyrics (USLT, LYRICS, or synchronized tags) from a local audio file.
+pub fn extract_embedded_lyrics(path: &Path) -> Option<String> {
+    let tagged = Probe::open(path)
+        .ok()?
+        .options(ParseOptions::new().read_properties(false))
+        .read()
+        .ok()?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag())?;
+    for item in tag.items() {
+        if item.key() == &ItemKey::Lyrics {
+            if let Some(txt) = item.value().text() {
+                let trimmed = txt.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Tags a downloaded or offline audio file with metadata and cover artwork.
+pub fn tag_audio_file(
+    path: &Path,
+    title: &str,
+    artist: &str,
+    album: Option<&str>,
+    cover_bytes: Option<&[u8]>,
+) -> Result<(), String> {
+    use lofty::config::WriteOptions;
+    use lofty::picture::{MimeType, Picture, PictureType};
+    use lofty::tag::{Tag, TagExt};
+
+    let mut tagged = Probe::open(path)
+        .map_err(|e| e.to_string())?
+        .read()
+        .map_err(|e| e.to_string())?;
+
+    let tag = match tagged.primary_tag_mut() {
+        Some(t) => t,
+        None => {
+            let tag_type = tagged.primary_tag_type();
+            tagged.insert_tag(Tag::new(tag_type));
+            tagged
+                .primary_tag_mut()
+                .ok_or_else(|| "Could not create tag".to_string())?
+        }
+    };
+
+    tag.set_title(title.to_string());
+    tag.set_artist(artist.to_string());
+    if let Some(alb) = album {
+        tag.set_album(alb.to_string());
+    }
+
+    if let Some(bytes) = cover_bytes {
+        if !bytes.is_empty() {
+            let mime = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+                MimeType::Png
+            } else {
+                MimeType::Jpeg
+            };
+            let pic = Picture::new_unchecked(
+                PictureType::CoverFront,
+                Some(mime),
+                None,
+                bytes.to_vec(),
+            );
+            tag.push_picture(pic);
+        }
+    }
+
+    tag.save_to_path(path, WriteOptions::default())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+

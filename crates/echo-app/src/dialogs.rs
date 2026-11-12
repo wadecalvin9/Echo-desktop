@@ -50,6 +50,22 @@ pub fn pick_backup_open(
     }
 }
 
+pub fn pick_playlist_open(
+    owner_hwnd: Option<isize>,
+    initial_dir: Option<&Path>,
+) -> Result<Option<PathBuf>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let initial = initial_dir.map(Path::to_path_buf);
+        run_sta(move || win32::pick_playlist_open_impl(owner_hwnd, initial.as_deref()))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (owner_hwnd, initial_dir);
+        Ok(None)
+    }
+}
+
 #[cfg(target_os = "windows")]
 fn run_sta<F>(f: F) -> Result<Option<PathBuf>, String>
 where
@@ -200,6 +216,39 @@ mod win32 {
             pszSpec: PCWSTR(spec.as_ptr()),
         }];
         let title = wide_z("Import Echo Backup");
+        unsafe {
+            let opts = base.GetOptions().unwrap_or_default();
+            let _ = base.SetOptions(opts | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);
+            let _ = base.SetTitle(PCWSTR(title.as_ptr()));
+            let _ = base.SetFileTypes(&filters);
+        }
+        set_initial_folder(&base, initial_dir);
+        read_result_path(&base, resolve_hwnd(owner_hwnd))
+    }
+
+    pub fn pick_playlist_open_impl(
+        owner_hwnd: Option<isize>,
+        initial_dir: Option<&Path>,
+    ) -> Result<Option<PathBuf>, String> {
+        let _com = ComGuard::init_sta()?;
+        let dlg: IFileOpenDialog = unsafe { CoCreateInstance(&FileOpenDialog, None, CLSCTX_ALL) }
+            .map_err(|e| format!("Open dialog failed: {e}"))?;
+        let base: IFileDialog = dlg.cast().map_err(|e| format!("COM cast failed: {e}"))?;
+        let name = wide_z("Playlists & Libraries (*.csv, *.xml, *.m3u, *.m3u8, *.txt)");
+        let spec = wide_z("*.csv;*.xml;*.m3u;*.m3u8;*.txt");
+        let all_name = wide_z("All Files (*.*)");
+        let all_spec = wide_z("*.*");
+        let filters = [
+            COMDLG_FILTERSPEC {
+                pszName: PCWSTR(name.as_ptr()),
+                pszSpec: PCWSTR(spec.as_ptr()),
+            },
+            COMDLG_FILTERSPEC {
+                pszName: PCWSTR(all_name.as_ptr()),
+                pszSpec: PCWSTR(all_spec.as_ptr()),
+            },
+        ];
+        let title = wide_z("Import Playlist or Library");
         unsafe {
             let opts = base.GetOptions().unwrap_or_default();
             let _ = base.SetOptions(opts | FOS_FILEMUSTEXIST | FOS_FORCEFILESYSTEM);

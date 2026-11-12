@@ -121,6 +121,69 @@ impl std::fmt::Display for EqPreset {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum AutoEqProfile {
+    #[default]
+    None,
+    SonyWh1000Xm4,
+    SonyWh1000Xm5,
+    AirPodsPro2,
+    AirPodsMax,
+    SennheiserHd650,
+    BoseQc45,
+    GalaxyBuds2Pro,
+    BeyerdynamicDt770,
+}
+
+impl AutoEqProfile {
+    pub const ALL: [Self; 9] = [
+        Self::None,
+        Self::SonyWh1000Xm4,
+        Self::SonyWh1000Xm5,
+        Self::AirPodsPro2,
+        Self::AirPodsMax,
+        Self::SennheiserHd650,
+        Self::BoseQc45,
+        Self::GalaxyBuds2Pro,
+        Self::BeyerdynamicDt770,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::None => "None (Preset / Custom)",
+            Self::SonyWh1000Xm4 => "Sony WH-1000XM4 (Harman)",
+            Self::SonyWh1000Xm5 => "Sony WH-1000XM5 (Harman)",
+            Self::AirPodsPro2 => "Apple AirPods Pro 2",
+            Self::AirPodsMax => "Apple AirPods Max",
+            Self::SennheiserHd650 => "Sennheiser HD 650 / 6XX",
+            Self::BoseQc45 => "Bose QuietComfort 45",
+            Self::GalaxyBuds2Pro => "Samsung Galaxy Buds 2 Pro",
+            Self::BeyerdynamicDt770 => "Beyerdynamic DT 770 Pro (80Ω)",
+        }
+    }
+
+    /// AutoEQ Harman-target calibrated 10-band compensation curve [31, 62, 125, 250, 500, 1k, 2k, 4k, 8k, 16k Hz].
+    pub fn gains_db(self) -> Option<[f32; 10]> {
+        match self {
+            Self::None => None,
+            Self::SonyWh1000Xm4 => Some([-1.5, -2.5, -1.8, -0.5, 0.5, 1.2, 2.5, -1.0, 3.2, 1.0]),
+            Self::SonyWh1000Xm5 => Some([-1.0, -2.0, -1.5, -0.2, 0.8, 1.0, 2.0, -0.5, 2.8, 0.5]),
+            Self::AirPodsPro2 => Some([0.5, 0.8, 0.2, -0.5, 0.0, 0.5, 1.5, 0.5, -1.2, 0.8]),
+            Self::AirPodsMax => Some([0.0, 0.5, 0.2, -0.8, -0.2, 0.5, 1.2, 0.0, -1.8, 1.2]),
+            Self::SennheiserHd650 => Some([4.5, 3.8, 2.0, 0.5, -0.5, 0.0, -0.8, 1.5, 2.5, 3.5]),
+            Self::BoseQc45 => Some([0.5, -0.5, -1.0, -0.2, 0.5, 1.2, 1.8, -2.2, 1.5, -1.0]),
+            Self::GalaxyBuds2Pro => Some([0.0, -0.5, -0.2, 0.0, 0.5, 0.2, -1.0, 1.5, -0.5, 1.0]),
+            Self::BeyerdynamicDt770 => Some([1.5, 0.5, -1.0, -0.5, 0.5, 1.0, 0.5, -3.5, -4.5, -1.5]),
+        }
+    }
+}
+
+impl std::fmt::Display for AutoEqProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum SpatialMode {
     #[default]
     Off,
@@ -210,6 +273,13 @@ pub struct AppSettings {
     pub lastfm_session_key: Option<String>,
     pub lastfm_username: Option<String>,
     pub lastfm_scrobbling_enabled: bool,
+    pub custom_eq_bands: [f32; 10],
+    pub auto_eq_profile: AutoEqProfile,
+    pub playback_speed: f32,
+    pub output_device: Option<String>,
+    pub lyrics_offset_ms: i64,
+    pub excluded_artists: Vec<String>,
+    pub excluded_tracks: Vec<String>,
 }
 
 impl Default for AppSettings {
@@ -248,6 +318,13 @@ impl Default for AppSettings {
             lastfm_session_key: None,
             lastfm_username: None,
             lastfm_scrobbling_enabled: false,
+            custom_eq_bands: [0.0; 10],
+            auto_eq_profile: AutoEqProfile::None,
+            playback_speed: 1.0,
+            output_device: None,
+            lyrics_offset_ms: 0,
+            excluded_artists: Vec::new(),
+            excluded_tracks: Vec::new(),
         }
     }
 }

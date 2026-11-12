@@ -19,15 +19,17 @@ use crate::theme::{
     up_next_card_button_style, window_control_button_style, with_alpha,
     mini_player_fallback_style, mini_player_scrim_style,
 };
-use echo_audio::{AudioEngine, AudioSourceSpec, PlaybackStatus};
+use echo_audio::{available_output_devices, AudioEngine, AudioSourceSpec, PlaybackStatus};
 use echo_core::{
-    base_version_key, cache_stats, clear_cache_dir, default_backup_path, download_file_path,
-    export_backup, is_preview_title, lookup_cached_stream, migrate_download_file, prune_queue_tail,
-    scan_download_folders, scan_local_folders, score_artist_name, score_candidate,
-    store_cached_stream, validate_and_unpack_backup, AppSettings, AudioQuality, DynamicPalette,
-    EchoDb, EqPreset, ListenerContext, ListeningSummary, LocalMediaScanConfig, Playlist,
-    QueueState, RecognitionEntry, RecognitionSource, RepeatMode, ScannerSensitivity, SpatialMode,
-    ThemeMode, Track, TrackStats,
+    base_version_key, cache_stats, clear_cache_dir, default_backup_path, discover_ssdp_devices,
+    download_file_path, export_backup, extract_embedded_lyrics, import_playlist_file,
+    is_preview_title, lookup_cached_stream, migrate_download_file, parse_cast_address,
+    prune_queue_tail, scan_download_folders, scan_local_folders, score_artist_name,
+    score_candidate, store_cached_stream, tag_audio_file, validate_and_unpack_backup, AlbumRef,
+    AppSettings, ArtistRef, AudioQuality, AutoEqProfile, CastDevice, CastProtocol, DynamicPalette,
+    EchoDb, EqPreset, ListenerContext, ListeningSummary, LocalMediaScanConfig,
+    Playlist, QueueState, RecognitionEntry, RecognitionSource, RepeatMode, ScannerSensitivity,
+    SpatialMode, ThemeMode, Track, TrackStats,
 };
 use echo_fingerprint::{capture_16khz_mono, Recognised, RecognitionOutcome, ShazamClient};
 use echo_lastfm::{qualifies_for_scrobble, LastFmClient};
@@ -369,15 +371,68 @@ enum LibraryTab {
     History,
     Downloads,
     Local,
+    Songs,
+    Artists,
+    Albums,
     Playlist(usize),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum LibraryFilter {
     All,
+    Songs,
+    Artists,
+    Albums,
     Playlists,
     Downloads,
     Local,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SongsSortColumn {
+    Title,
+    Artist,
+    Duration,
+    DateAdded,
+    PlayCount,
+}
+
+impl SongsSortColumn {
+    pub const ALL: [Self; 5] = [
+        Self::Title,
+        Self::Artist,
+        Self::Duration,
+        Self::DateAdded,
+        Self::PlayCount,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Title => "Title",
+            Self::Artist => "Artist",
+            Self::Duration => "Duration",
+            Self::DateAdded => "Date Added",
+            Self::PlayCount => "Play Count",
+        }
+    }
+}
+
+impl std::fmt::Display for SongsSortColumn {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OutputDeviceOption {
+    pub label: String,
+    pub device: Option<String>,
+}
+
+impl std::fmt::Display for OutputDeviceOption {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -664,6 +719,38 @@ enum Message {
         loudness_db: Option<f32>,
         ok: bool,
     },
+
+    // DSP & Audio Enhancements
+    AutoEqProfileSelected(AutoEqProfile),
+    EqBandChanged(usize, f32),
+    ResetCustomEq,
+    PlaybackSpeedChanged(f32),
+    OutputDeviceSelected(Option<String>),
+
+    // Lyrics Calibration & Share
+    AdjustLyricsOffset(i64),
+    ResetLyricsOffset,
+    ShareLyricsCard,
+
+    // Recommendation Exclusions & Snooze
+    ExcludeTrack(Track),
+    ExcludeArtist(String),
+    RemoveExcludedArtist(String),
+    RemoveExcludedTrack(String),
+
+    // Library Views & External Importer
+    SongsSortColumnChanged(SongsSortColumn),
+    SongsSortAscendingToggled,
+    PickPlaylistImportFile,
+    PlaylistImportFilePicked(Result<Option<PathBuf>, String>),
+
+    // Casting & Remote Playback
+    ToggleCastModal,
+    ScanCastDevices,
+    CastDevicesFound(Vec<CastDevice>),
+    SelectCastDevice(Option<CastDevice>),
+    CastAddressInputChanged(String),
+    ConnectCastAddress,
 }
 
 struct ScrobbleTracker {
@@ -819,6 +906,16 @@ struct EchoApp {
     missing_loudness_count: usize,
 
     toast: Option<(String, Instant)>,
+
+    songs_sort_column: SongsSortColumn,
+    songs_sort_ascending: bool,
+    all_songs: Vec<Track>,
+    show_cast_modal: bool,
+    discovered_cast_devices: Vec<CastDevice>,
+    active_cast_device: Option<CastDevice>,
+    cast_scanning: bool,
+    cast_address_input: String,
+    available_audio_devices: Vec<String>,
 }
 
 impl EchoApp {
@@ -837,6 +934,12 @@ impl EchoApp {
         let audio = Arc::new(AudioEngine::new(settings.volume, settings.audio_normalization));
         audio.set_skip_silence(settings.skip_silence);
         audio.set_dsp(settings.eq_preset, settings.spatial_mode);
+        audio.set_eq_bands(settings.custom_eq_bands);
+        audio.set_playback_speed(settings.playback_speed);
+        if let Some(ref dev) = settings.output_device {
+            audio.set_output_device(Some(dev.clone()));
+        }
+        let available_audio_devices = available_output_devices();
         let palette = DynamicPalette::default_for(settings.theme_mode);
         let pre_mute_volume = settings.volume.max(0.5);
         let yt_cookie_input = settings.youtube_cookie.clone().unwrap_or_default();
@@ -973,6 +1076,15 @@ impl EchoApp {
             repair_status: None,
             missing_loudness_count: 0,
             toast: None,
+            songs_sort_column: SongsSortColumn::Title,
+            songs_sort_ascending: true,
+            all_songs: Vec::new(),
+            show_cast_modal: false,
+            discovered_cast_devices: Vec::new(),
+            active_cast_device: None,
+            cast_scanning: false,
+            cast_address_input: String::new(),
+            available_audio_devices,
         };
 
         app.refresh_db_views();
@@ -1085,6 +1197,50 @@ impl EchoApp {
             .tracks_missing_loudness()
             .map(|v| v.len())
             .unwrap_or(0);
+
+        let mut seen = std::collections::HashSet::new();
+        let mut all = Vec::new();
+        let mut add = |t: &Track| {
+            if seen.insert(t.id.clone()) {
+                all.push(t.clone());
+            }
+        };
+        for t in &self.liked_tracks {
+            add(t);
+        }
+        for (t, _, _) in &self.downloaded_tracks {
+            add(t);
+        }
+        for t in &self.local_tracks {
+            add(t);
+        }
+        for t in &self.history_tracks {
+            add(t);
+        }
+        self.all_songs = all;
+        self.sort_all_songs();
+    }
+
+    fn sort_all_songs(&mut self) {
+        match self.songs_sort_column {
+            SongsSortColumn::Title => {
+                self.all_songs.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+            }
+            SongsSortColumn::Artist => {
+                self.all_songs.sort_by(|a, b| a.primary_artist().to_lowercase().cmp(&b.primary_artist().to_lowercase()));
+            }
+            SongsSortColumn::Duration => {
+                self.all_songs.sort_by_key(|t| t.duration_secs.unwrap_or(0));
+            }
+            SongsSortColumn::DateAdded => {}
+            SongsSortColumn::PlayCount => {
+                let stats_map: std::collections::HashMap<&str, u64> = self.stats.iter().map(|s| (s.track.id.as_str(), s.play_count)).collect();
+                self.all_songs.sort_by_key(|t| std::cmp::Reverse(stats_map.get(t.id.as_str()).copied().unwrap_or(0)));
+            }
+        }
+        if !self.songs_sort_ascending && self.songs_sort_column != SongsSortColumn::PlayCount {
+            self.all_songs.reverse();
+        }
     }
 
     fn refresh_stats_summary(&mut self) {
@@ -1140,13 +1296,16 @@ impl EchoApp {
     }
 
     fn load_taste_shelves_task(&self) -> Task<Message> {
-        let disliked_artists: HashSet<String> = self
+        let mut disliked_artists: HashSet<String> = self
             .listener_ctx
             .skipped_artists
             .iter()
             .filter(|(art, &cnt)| cnt >= 2 && !self.listener_ctx.liked_artists.contains(*art))
             .map(|(art, _)| art.clone())
             .collect();
+        for ex in &self.settings.excluded_artists {
+            disliked_artists.insert(ex.trim().to_lowercase());
+        }
 
         let mut seed_artists: Vec<(Option<String>, String)> = Vec::new();
         let mut seen_artists = HashSet::new();
@@ -1552,6 +1711,26 @@ impl EchoApp {
         let better_enabled = self.settings.better_lyrics_enabled;
         Task::perform(
             async move {
+                if let Some(path_str) = &t_lyrics.local_path {
+                    let p = std::path::Path::new(path_str);
+                    if let Some(raw) = extract_embedded_lyrics(p) {
+                        let synced = echo_lyrics::parse_lrc(&raw);
+                        let res = if !synced.is_empty() {
+                            Some(LyricsResult {
+                                source: echo_lyrics::LyricsSource::LocalLrc,
+                                synced,
+                                plain: None,
+                            })
+                        } else {
+                            Some(LyricsResult {
+                                source: echo_lyrics::LyricsSource::LocalLrc,
+                                synced: Vec::new(),
+                                plain: Some(raw),
+                            })
+                        };
+                        return (t_lyrics.id, res);
+                    }
+                }
                 let res = lf
                     .fetch_with_options(
                         &t_lyrics.title,
@@ -3584,9 +3763,23 @@ impl EchoApp {
                 self.downloading_ids.remove(&track.id);
                 match result {
                     Ok((path_str, mime, len)) => {
+                        let path_clone = path_str.clone();
+                        let title = track.title.clone();
+                        let artist = track.artist_display();
+                        let album = track.album.as_ref().map(|a| a.title.clone());
+                        let cover = self.cover_bytes.get(&track.id).cloned();
+                        tokio::task::spawn_blocking(move || {
+                            let _ = tag_audio_file(
+                                std::path::Path::new(&path_clone),
+                                &title,
+                                &artist,
+                                album.as_deref(),
+                                cover.as_deref(),
+                            );
+                        });
                         let _ = self.db.upsert_download(&track, &path_str, Some(&mime), len);
                         self.refresh_db_views();
-                        self.set_toast(format!("Downloaded: {}", track.title));
+                        self.set_toast(format!("Downloaded & tagged: {}", track.title));
                     }
                     Err(e) => {
                         self.download_status = Some(format!("Download failed ({}): {e}", track.title));
@@ -4023,8 +4216,238 @@ impl EchoApp {
             }
             Message::EqPresetSelected(preset) => {
                 self.settings.eq_preset = preset;
-                self.audio.set_dsp(preset, self.settings.spatial_mode);
+                self.settings.custom_eq_bands = preset.gains_db();
+                self.settings.auto_eq_profile = AutoEqProfile::None;
+                self.audio.set_eq_bands(preset.gains_db());
                 let _ = self.settings.save();
+                Task::none()
+            }
+            Message::AutoEqProfileSelected(profile) => {
+                self.settings.auto_eq_profile = profile;
+                if let Some(bands) = profile.gains_db() {
+                    self.settings.custom_eq_bands = bands;
+                    self.audio.set_eq_bands(bands);
+                }
+                let _ = self.settings.save();
+                self.set_toast(format!("AutoEQ: {}", profile.label()));
+                Task::none()
+            }
+            Message::EqBandChanged(idx, val) => {
+                if idx < 10 {
+                    self.settings.custom_eq_bands[idx] = val;
+                    self.settings.auto_eq_profile = AutoEqProfile::None;
+                    self.audio.set_eq_bands(self.settings.custom_eq_bands);
+                    let _ = self.settings.save();
+                }
+                Task::none()
+            }
+            Message::ResetCustomEq => {
+                self.settings.custom_eq_bands = [0.0; 10];
+                self.settings.auto_eq_profile = AutoEqProfile::None;
+                self.settings.eq_preset = EqPreset::Flat;
+                self.audio.set_eq_bands(self.settings.custom_eq_bands);
+                let _ = self.settings.save();
+                self.set_toast("Equalizer reset to Flat (0 dB)");
+                Task::none()
+            }
+            Message::PlaybackSpeedChanged(speed) => {
+                let s = speed.clamp(0.5, 2.0);
+                self.settings.playback_speed = s;
+                self.audio.set_playback_speed(s);
+                let _ = self.settings.save();
+                self.set_toast(format!("Playback speed: {:.2}×", s));
+                Task::none()
+            }
+            Message::OutputDeviceSelected(dev) => {
+                self.settings.output_device = dev.clone();
+                self.audio.set_output_device(dev.clone());
+                let _ = self.settings.save();
+                self.set_toast(format!("Audio output: {}", dev.as_deref().unwrap_or("System Default")));
+                Task::none()
+            }
+            Message::AdjustLyricsOffset(delta_ms) => {
+                self.settings.lyrics_offset_ms = (self.settings.lyrics_offset_ms + delta_ms).clamp(-10000, 10000);
+                let _ = self.settings.save();
+                self.set_toast(format!("Lyrics offset: {:+.1}s", self.settings.lyrics_offset_ms as f32 / 1000.0));
+                Task::none()
+            }
+            Message::ResetLyricsOffset => {
+                self.settings.lyrics_offset_ms = 0;
+                let _ = self.settings.save();
+                self.set_toast("Lyrics offset reset to 0.0s");
+                Task::none()
+            }
+            Message::ShareLyricsCard => {
+                if let Some(cur) = self.queue.current() {
+                    let calibrated_ms = (self.position_ms as i64 + self.settings.lyrics_offset_ms).max(0) as u64;
+                    let quote_line = self
+                        .active_lyrics
+                        .as_ref()
+                        .and_then(|r| r.synced.get(r.active_index(calibrated_ms).unwrap_or(0)))
+                        .map(|l| l.text.as_str())
+                        .unwrap_or(&cur.track.title);
+                    let quote_card = format!(
+                        "“{}”\n\n— {}, {}\n🎧 Shared from Echo",
+                        quote_line,
+                        cur.track.primary_artist(),
+                        cur.track.title
+                    );
+                    self.set_toast("Lyrics quote copied to clipboard!");
+                    return iced::clipboard::write(quote_card);
+                }
+                Task::none()
+            }
+            Message::ExcludeTrack(t) => {
+                if !self.settings.excluded_tracks.contains(&t.id) {
+                    self.settings.excluded_tracks.push(t.id.clone());
+                    let _ = self.settings.save();
+                    self.set_toast(format!("Will not recommend '{}'", t.title));
+                }
+                self.track_menu = None;
+                Task::none()
+            }
+            Message::ExcludeArtist(artist) => {
+                let a_trim = artist.trim().to_string();
+                if !a_trim.is_empty() && !self.settings.excluded_artists.iter().any(|x| x.eq_ignore_ascii_case(&a_trim)) {
+                    self.settings.excluded_artists.push(a_trim.clone());
+                    let _ = self.settings.save();
+                    self.set_toast(format!("Will not recommend songs by '{}'", a_trim));
+                }
+                self.track_menu = None;
+                Task::none()
+            }
+            Message::RemoveExcludedArtist(artist) => {
+                self.settings.excluded_artists.retain(|x| !x.eq_ignore_ascii_case(&artist));
+                let _ = self.settings.save();
+                self.set_toast(format!("Restored '{}' to recommendations", artist));
+                Task::none()
+            }
+            Message::RemoveExcludedTrack(id) => {
+                self.settings.excluded_tracks.retain(|x| x != &id);
+                let _ = self.settings.save();
+                self.set_toast("Restored song to recommendations");
+                Task::none()
+            }
+            Message::SongsSortColumnChanged(col) => {
+                if self.songs_sort_column == col {
+                    self.songs_sort_ascending = !self.songs_sort_ascending;
+                } else {
+                    self.songs_sort_column = col;
+                    self.songs_sort_ascending = true;
+                }
+                self.sort_all_songs();
+                Task::none()
+            }
+            Message::SongsSortAscendingToggled => {
+                self.songs_sort_ascending = !self.songs_sort_ascending;
+                self.sort_all_songs();
+                Task::none()
+            }
+            Message::PickPlaylistImportFile => {
+                let hwnd = self.window_hwnd;
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            dialogs::pick_playlist_open(hwnd, None)
+                        })
+                        .await
+                        .map_err(|e| e.to_string())?
+                    },
+                    Message::PlaylistImportFilePicked,
+                )
+            }
+            Message::PlaylistImportFilePicked(res) => {
+                match res {
+                    Ok(Some(path)) => {
+                        match import_playlist_file(&path) {
+                            Ok(imported_pls) => {
+                                let mut total_tracks = 0;
+                                for pl in imported_pls {
+                                    total_tracks += pl.tracks.len();
+                                    let clean_name: String = pl.name.chars().filter(|c| c.is_alphanumeric() || *c == ' ' || *c == '_').collect();
+                                    let pl_id = format!("local_imp_{}_{}", chrono::Utc::now().timestamp_millis(), clean_name.replace(' ', "_"));
+                                    let _ = self.db.create_playlist(&pl_id, &pl.name);
+                                    for (i, imp_t) in pl.tracks.into_iter().enumerate() {
+                                        let track_id = format!("imp_{}_{}", chrono::Utc::now().timestamp_millis(), i);
+                                        let track = Track {
+                                            id: track_id,
+                                            title: imp_t.title,
+                                            artists: vec![ArtistRef { id: None, name: imp_t.artist }],
+                                            album: imp_t.album.map(|a| AlbumRef { id: None, title: a }),
+                                            duration_secs: imp_t.duration_secs,
+                                            thumbnail_url: None,
+                                            loudness_db: None,
+                                            liked: false,
+                                            is_local: false,
+                                            local_path: None,
+                                        };
+                                        let _ = self.db.add_to_playlist(&pl_id, &track);
+                                    }
+                                }
+                                self.refresh_db_views();
+                                self.set_toast(format!("Imported {} tracks into playlists!", total_tracks));
+                            }
+                            Err(e) => {
+                                self.set_toast(format!("Playlist import error: {e}"));
+                            }
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        self.set_toast(format!("Failed to open file: {e}"));
+                    }
+                }
+                Task::none()
+            }
+            Message::ToggleCastModal => {
+                self.show_cast_modal = !self.show_cast_modal;
+                if self.show_cast_modal && self.discovered_cast_devices.is_empty() {
+                    return self.update(Message::ScanCastDevices);
+                }
+                Task::none()
+            }
+            Message::ScanCastDevices => {
+                self.cast_scanning = true;
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(|| {
+                            discover_ssdp_devices(std::time::Duration::from_millis(1500))
+                        })
+                        .await
+                        .unwrap_or_default()
+                    },
+                    Message::CastDevicesFound,
+                )
+            }
+            Message::CastDevicesFound(devices) => {
+                self.cast_scanning = false;
+                self.discovered_cast_devices = devices;
+                Task::none()
+            }
+            Message::SelectCastDevice(dev) => {
+                self.active_cast_device = dev.clone();
+                if let Some(d) = dev {
+                    self.set_toast(format!("Casting audio to {}", d.name));
+                } else {
+                    self.set_toast("Playback switched back to PC");
+                }
+                Task::none()
+            }
+            Message::CastAddressInputChanged(input) => {
+                self.cast_address_input = input;
+                Task::none()
+            }
+            Message::ConnectCastAddress => {
+                if let Some(dev) = parse_cast_address(&self.cast_address_input) {
+                    self.active_cast_device = Some(dev.clone());
+                    if !self.discovered_cast_devices.iter().any(|d| d.id == dev.id) {
+                        self.discovered_cast_devices.push(dev.clone());
+                    }
+                    self.cast_address_input.clear();
+                    self.set_toast(format!("Connected to {}", dev.name));
+                } else {
+                    self.set_toast("Invalid Cast address (e.g. chromecast://192.168.1.50)");
+                }
                 Task::none()
             }
             Message::SpatialModeSelected(mode) => {
@@ -4561,6 +4984,24 @@ impl EchoApp {
                     },
                 ));
             }
+            menu_col = menu_col.push(
+                container(horizontal_space())
+                    .height(1)
+                    .width(Length::Fill)
+                    .style(divider_style(0.10)),
+            );
+            menu_col = menu_col.push(menu_row(
+                icons::CLOSE,
+                "Don't suggest this song".to_string(),
+                muted,
+                Message::ExcludeTrack(track.clone()),
+            ));
+            menu_col = menu_col.push(menu_row(
+                icons::CLOSE,
+                format!("Don't suggest {}", ellipsize(track.primary_artist(), 20)),
+                muted,
+                Message::ExcludeArtist(track.primary_artist().to_string()),
+            ));
             if !self.playlists.is_empty() {
                 menu_col = menu_col.push(
                     container(horizontal_space())
@@ -4600,7 +5041,161 @@ impl EchoApp {
             layers.push(overlay.into());
         }
 
+        if self.show_cast_modal {
+            layers.push(self.view_cast_modal());
+        }
+
         stack(layers).into()
+    }
+
+    fn view_cast_modal(&self) -> Element<'_, Message> {
+        let p = self.palette;
+        let muted = color_from_rgb(p.text_muted);
+        let accent = color_from_rgb(p.primary);
+
+        let header = row![
+            icons::icon(icons::CAST, 20.0, accent),
+            text("Cast to Device").size(17).font(bold()),
+            horizontal_space(),
+            button(icons::icon(icons::CLOSE, 16.0, muted))
+                .padding(6)
+                .style(icon_button_style(p, false))
+                .on_press(Message::ToggleCastModal),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let desc = text("Stream playback to Google Cast / Chromecast, Smart TVs, Nest Hub, DLNA / UPnP receivers, or FCast devices.")
+            .size(12)
+            .color(muted);
+
+        let refresh_btn = button(
+            row![
+                icons::icon(icons::REFRESH, 14.0, if self.cast_scanning { accent } else { muted }),
+                text(if self.cast_scanning { "Scanning..." } else { "Scan Network" }).size(12),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center),
+        )
+        .padding([5, 11])
+        .style(top_pill_button_style(p, false))
+        .on_press(Message::ScanCastDevices);
+
+        let scan_row = row![
+            text("Discovered Devices").size(13).font(semibold()),
+            horizontal_space(),
+            refresh_btn,
+        ]
+        .align_y(Alignment::Center);
+
+        let is_local_active = self.active_cast_device.is_none();
+        let pc_item = button(
+            row![
+                icons::icon(icons::SPEAKER, 18.0, if is_local_active { accent } else { muted }),
+                column![
+                    text("This Computer (Local Playback)").size(13).font(if is_local_active { bold() } else { semibold() }),
+                    text("Speakers and headphones connected directly to this PC").size(11).color(muted),
+                ]
+                .spacing(2),
+                horizontal_space(),
+                if is_local_active {
+                    container(icons::icon(icons::CHECK_CIRCLE, 16.0, accent))
+                } else {
+                    container(horizontal_space().width(16))
+                },
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        )
+        .padding([8, 12])
+        .width(Length::Fill)
+        .style(tile_button_style(p))
+        .on_press(Message::SelectCastDevice(None));
+
+        let mut dev_list = column![pc_item].spacing(6);
+
+        for dev in &self.discovered_cast_devices {
+            let is_active = self.active_cast_device.as_ref().map(|d| d.id == dev.id).unwrap_or(false);
+            let proto_badge = match dev.protocol {
+                CastProtocol::Chromecast => "Chromecast",
+                CastProtocol::Dlna => "DLNA",
+                CastProtocol::FCast => "FCast",
+            };
+            let dev_clone = dev.clone();
+            let row_item = button(
+                row![
+                    icons::icon(icons::CAST, 18.0, if is_active { accent } else { muted }),
+                    column![
+                        text(&dev.name).size(13).font(if is_active { bold() } else { semibold() }),
+                        row![
+                            container(text(proto_badge).size(9).font(bold()).color(Color::WHITE))
+                                .padding([2, 5])
+                                .style(stats_rank_badge_style(p, true)),
+                            text(format!(" • {}", dev.address)).size(11).color(muted),
+                        ]
+                        .spacing(4)
+                        .align_y(Alignment::Center),
+                    ]
+                    .spacing(2),
+                    horizontal_space(),
+                    if is_active {
+                        container(icons::icon(icons::CHECK_CIRCLE, 16.0, accent))
+                    } else {
+                        container(horizontal_space().width(16))
+                    },
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            )
+            .padding([8, 12])
+            .width(Length::Fill)
+            .style(tile_button_style(p))
+            .on_press(Message::SelectCastDevice(Some(dev_clone)));
+            dev_list = dev_list.push(row_item);
+        }
+
+        let manual_connect_row = row![
+            text_input("chromecast://192.168.1.50 or http://...", &self.cast_address_input)
+                .on_input(Message::CastAddressInputChanged)
+                .on_submit(Message::ConnectCastAddress)
+                .padding([7, 12])
+                .size(12)
+                .style(pill_search_input_style(p))
+                .width(Length::Fill),
+            button(text("Connect").size(12))
+                .padding([7, 14])
+                .style(top_pill_button_style(p, true))
+                .on_press(Message::ConnectCastAddress),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
+        let content = column![
+            header,
+            desc,
+            container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.08)),
+            scan_row,
+            container(dev_list).max_height(220),
+            container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.08)),
+            text("Manual Device IP or URL").size(12).font(semibold()),
+            manual_connect_row,
+        ]
+        .spacing(12);
+
+        let card = container(content)
+            .width(440)
+            .padding(18)
+            .style(popover_panel_style(p));
+
+        mouse_area(
+            container(card)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .on_press(Message::ToggleCastModal)
+        .into()
     }
 
     fn view_top_bar(&self) -> Element<'_, Message> {
@@ -4968,20 +5563,26 @@ impl EchoApp {
 
         let filter_pill = |label: &'static str, f: LibraryFilter| -> Element<'_, Message> {
             let active = self.library_filter == f;
-            button(text(label).size(12))
-                .padding([5, 11])
+            button(text(label).size(11))
+                .padding([4, 9])
                 .style(top_pill_button_style(p, active))
                 .on_press(Message::LibraryFilterSelected(f))
                 .into()
         };
-        let filter_row = row![
+        let filter_row_1 = row![
+            filter_pill("Songs", LibraryFilter::Songs),
+            filter_pill("Artists", LibraryFilter::Artists),
+            filter_pill("Albums", LibraryFilter::Albums),
+        ]
+        .spacing(4);
+        let filter_row_2 = row![
             filter_pill("Playlists", LibraryFilter::Playlists),
             filter_pill("Downloads", LibraryFilter::Downloads),
             filter_pill("Local", LibraryFilter::Local),
         ]
-        .spacing(6);
+        .spacing(4);
 
-        let mut list = column![filter_row, vertical_space().height(6)].spacing(2);
+        let mut list = column![filter_row_1, filter_row_2, vertical_space().height(6)].spacing(4);
 
         if self.show_new_playlist_input {
             list = list.push(
@@ -5004,6 +5605,9 @@ impl EchoApp {
             list = list.push(vertical_space().height(6));
         }
 
+        let show_songs = matches!(self.library_filter, LibraryFilter::All | LibraryFilter::Songs);
+        let show_artists = matches!(self.library_filter, LibraryFilter::All | LibraryFilter::Artists);
+        let show_albums = matches!(self.library_filter, LibraryFilter::All | LibraryFilter::Albums);
         let show_playlists =
             matches!(self.library_filter, LibraryFilter::All | LibraryFilter::Playlists);
         let show_downloads =
@@ -5012,6 +5616,57 @@ impl EchoApp {
 
         let in_library =
             self.tab == NavTab::Playlists && self.viewing_detail.is_none() && !self.show_expanded;
+
+        if show_songs {
+            let songs_active = in_library && self.library_tab == LibraryTab::Songs;
+            let songs_badge = container(icons::icon(icons::DISC, 20.0, Color::WHITE))
+                .width(48)
+                .height(48)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .style(local_badge_style());
+            list = list.push(self.sidebar_badge_item(
+                "Songs",
+                "Master list • All tracks".to_string(),
+                songs_badge.into(),
+                songs_active,
+                Message::SelectLibraryTab(LibraryTab::Songs),
+            ));
+        }
+
+        if show_artists {
+            let artists_active = in_library && self.library_tab == LibraryTab::Artists;
+            let artists_badge = container(icons::icon(icons::USER, 20.0, Color::WHITE))
+                .width(48)
+                .height(48)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .style(liked_gradient_badge_style());
+            list = list.push(self.sidebar_badge_item(
+                "Artists",
+                "Library • Artists & tiles".to_string(),
+                artists_badge.into(),
+                artists_active,
+                Message::SelectLibraryTab(LibraryTab::Artists),
+            ));
+        }
+
+        if show_albums {
+            let albums_active = in_library && self.library_tab == LibraryTab::Albums;
+            let albums_badge = container(icons::icon(icons::LIBRARY, 20.0, Color::WHITE))
+                .width(48)
+                .height(48)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .style(downloads_badge_style());
+            list = list.push(self.sidebar_badge_item(
+                "Albums",
+                "Library • Saved & local albums".to_string(),
+                albums_badge.into(),
+                albums_active,
+                Message::SelectLibraryTab(LibraryTab::Albums),
+            ));
+        }
 
         if show_playlists {
             let liked_active = in_library && self.library_tab == LibraryTab::Liked;
@@ -6642,6 +7297,274 @@ impl EchoApp {
                 }
                 self.vscroll(col.push(vertical_space().height(24)))
             }
+            LibraryTab::Songs => {
+                let sort_row = row![
+                    text("Sort by:").size(12).color(color_from_rgb(self.palette.text_muted)),
+                    pick_list(
+                        &SongsSortColumn::ALL[..],
+                        Some(self.songs_sort_column),
+                        Message::SongsSortColumnChanged,
+                    )
+                    .padding([5, 10])
+                    .style(pick_list_style(self.palette))
+                    .menu_style(pick_list_menu_style(self.palette)),
+                    button(text(if self.songs_sort_ascending { "Asc ↑" } else { "Desc ↓" }).size(12))
+                        .padding([5, 10])
+                        .style(top_pill_button_style(self.palette, false))
+                        .on_press(Message::SongsSortAscendingToggled),
+                    horizontal_space(),
+                    button(
+                        row![
+                            icons::icon(icons::SHARE, 14.0, Color::WHITE),
+                            text("Import Playlist").size(12).font(bold()),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center)
+                    )
+                    .padding([6, 14])
+                    .style(top_pill_button_style(self.palette, true))
+                    .on_press(Message::PickPlaylistImportFile),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center);
+
+                let mut col = column![
+                    container(
+                        row![
+                            column![
+                                text("Songs").size(28).font(bold()),
+                                text(format!("{} master tracks in library", self.all_songs.len()))
+                                    .size(13)
+                                    .color(color_from_rgb(self.palette.text_muted)),
+                            ]
+                            .spacing(4),
+                            horizontal_space(),
+                            if !self.all_songs.is_empty() {
+                                button(
+                                    row![
+                                        icons::icon(icons::PLAY, 16.0, Color::BLACK),
+                                        text("Play All").size(13).font(bold()).color(Color::BLACK),
+                                    ]
+                                    .spacing(6)
+                                    .align_y(Alignment::Center)
+                                )
+                                .padding([8, 18])
+                                .style(glowing_play_button_style(self.palette))
+                                .on_press(Message::PlayTracks(self.all_songs.clone(), 0))
+                            } else {
+                                button(text("No Tracks").size(13))
+                            },
+                        ]
+                        .spacing(12)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([22, 24])
+                    .width(Length::Fill)
+                    .style(hero_banner_style(self.palette)),
+                    container(sort_row).padding([0, 20]),
+                ]
+                .spacing(14);
+
+                if self.all_songs.is_empty() {
+                    col = col.push(
+                        container(
+                            column![
+                                text("No songs in your library yet.").size(15).font(semibold()),
+                                text("Import your favorite playlists from Spotify, Apple Music XML, or M3U files, or scan local folders.")
+                                    .size(12)
+                                    .color(color_from_rgb(self.palette.text_muted)),
+                                vertical_space().height(10),
+                                button(text("Import Playlist File").size(13))
+                                    .padding([8, 16])
+                                    .style(top_pill_button_style(self.palette, true))
+                                    .on_press(Message::PickPlaylistImportFile),
+                            ]
+                            .spacing(6)
+                            .align_x(Alignment::Center),
+                        )
+                        .padding(40)
+                        .width(Length::Fill)
+                        .align_x(iced::alignment::Horizontal::Center),
+                    );
+                } else {
+                    col = col.push(self.table_header());
+                    let all_cloned = self.all_songs.clone();
+                    let list = self.all_songs.iter().enumerate().fold(
+                        column![].spacing(0),
+                        |c, (i, t)| {
+                            c.push(self.table_track_row(
+                                i + 1,
+                                t,
+                                Some((all_cloned.clone(), i)),
+                            ))
+                        },
+                    );
+                    col = col.push(container(list).padding([0, 16]));
+                }
+                self.vscroll(col.push(vertical_space().height(24)))
+            }
+            LibraryTab::Artists => {
+                let mut artist_map: std::collections::BTreeMap<String, (usize, Option<String>)> = std::collections::BTreeMap::new();
+                for t in &self.all_songs {
+                    let art_name = t.primary_artist().trim();
+                    if !art_name.is_empty() {
+                        let entry = artist_map.entry(art_name.to_string()).or_insert((0, None));
+                        entry.0 += 1;
+                        if entry.1.is_none() && t.thumbnail_url.is_some() {
+                            entry.1 = t.thumbnail_url.clone();
+                        }
+                    }
+                }
+                let mut artist_list: Vec<(String, usize, Option<String>)> = artist_map
+                    .into_iter()
+                    .map(|(k, (count, thumb))| (k, count, thumb))
+                    .collect();
+                artist_list.sort_by(|a, b| b.1.cmp(&a.1));
+
+                let mut col = column![
+                    container(
+                        row![
+                            column![
+                                text("Artists").size(28).font(bold()),
+                                text(format!("{} artists in library", artist_list.len()))
+                                    .size(13)
+                                    .color(color_from_rgb(self.palette.text_muted)),
+                            ]
+                            .spacing(4),
+                        ]
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([22, 24])
+                    .width(Length::Fill)
+                    .style(hero_banner_style(self.palette)),
+                ]
+                .spacing(14);
+
+                if artist_list.is_empty() {
+                    col = col.push(
+                        container(text("No artists found in your library.").size(14).color(color_from_rgb(self.palette.text_muted)))
+                            .padding(40)
+                            .align_x(iced::alignment::Horizontal::Center)
+                    );
+                } else {
+                    let mut grid_col = column![].spacing(10);
+                    let mut cur_row = row![].spacing(10);
+                    let mut cur_row_len = 0;
+                    for (name, count, thumb) in artist_list {
+                        let search_query = name.clone();
+                        let tile = button(
+                            column![
+                                self.artwork_widget(thumb.as_deref(), 110.0, false),
+                                text(name).size(13).font(bold()).wrapping(Wrapping::None),
+                                text(format!("{} tracks", count)).size(11).color(color_from_rgb(self.palette.text_muted)),
+                            ]
+                            .spacing(6)
+                            .align_x(Alignment::Center),
+                        )
+                        .width(130)
+                        .padding(10)
+                        .style(tile_button_style(self.palette))
+                        .on_press(Message::SearchExact(search_query));
+
+                        cur_row = cur_row.push(tile);
+                        cur_row_len += 1;
+                        if cur_row_len == 5 {
+                            grid_col = grid_col.push(cur_row);
+                            cur_row = row![].spacing(10);
+                            cur_row_len = 0;
+                        }
+                    }
+                    if cur_row_len > 0 {
+                        grid_col = grid_col.push(cur_row);
+                    }
+                    col = col.push(container(grid_col).padding([0, 20]));
+                }
+                self.vscroll(col.push(vertical_space().height(24)))
+            }
+            LibraryTab::Albums => {
+                let mut album_map: std::collections::BTreeMap<String, (String, usize, Option<String>, Vec<Track>)> = std::collections::BTreeMap::new();
+                for t in &self.all_songs {
+                    if let Some(ref alb) = t.album {
+                        let alb_title = alb.title.trim();
+                        if !alb_title.is_empty() {
+                            let entry = album_map.entry(alb_title.to_string()).or_insert_with(|| {
+                                (t.primary_artist().to_string(), 0, t.thumbnail_url.clone(), Vec::new())
+                            });
+                            entry.1 += 1;
+                            if entry.2.is_none() && t.thumbnail_url.is_some() {
+                                entry.2 = t.thumbnail_url.clone();
+                            }
+                            entry.3.push(t.clone());
+                        }
+                    }
+                }
+                let mut album_list: Vec<(String, String, usize, Option<String>, Vec<Track>)> = album_map
+                    .into_iter()
+                    .map(|(title, (artist, count, thumb, tracks))| (title, artist, count, thumb, tracks))
+                    .collect();
+                album_list.sort_by(|a, b| b.2.cmp(&a.2));
+
+                let mut col = column![
+                    container(
+                        row![
+                            column![
+                                text("Albums").size(28).font(bold()),
+                                text(format!("{} albums in library", album_list.len()))
+                                    .size(13)
+                                    .color(color_from_rgb(self.palette.text_muted)),
+                            ]
+                            .spacing(4),
+                        ]
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([22, 24])
+                    .width(Length::Fill)
+                    .style(hero_banner_style(self.palette)),
+                ]
+                .spacing(14);
+
+                if album_list.is_empty() {
+                    col = col.push(
+                        container(text("No albums found in your library.").size(14).color(color_from_rgb(self.palette.text_muted)))
+                            .padding(40)
+                            .align_x(iced::alignment::Horizontal::Center)
+                    );
+                } else {
+                    let mut grid_col = column![].spacing(10);
+                    let mut cur_row = row![].spacing(10);
+                    let mut cur_row_len = 0;
+                    for (title, artist, count, thumb, tracks) in album_list {
+                        let play_tracks = tracks.clone();
+                        let tile = button(
+                            column![
+                                self.artwork_widget(thumb.as_deref(), 120.0, false),
+                                text(title).size(13).font(bold()).wrapping(Wrapping::None),
+                                text(artist).size(11).color(color_from_rgb(self.palette.text_muted)).wrapping(Wrapping::None),
+                                text(format!("{} tracks", count)).size(10).color(color_from_rgb(self.palette.text_muted)),
+                            ]
+                            .spacing(4)
+                            .align_x(Alignment::Center),
+                        )
+                        .width(140)
+                        .padding(10)
+                        .style(tile_button_style(self.palette))
+                        .on_press(Message::PlayTracks(play_tracks, 0));
+
+                        cur_row = cur_row.push(tile);
+                        cur_row_len += 1;
+                        if cur_row_len == 5 {
+                            grid_col = grid_col.push(cur_row);
+                            cur_row = row![].spacing(10);
+                            cur_row_len = 0;
+                        }
+                    }
+                    if cur_row_len > 0 {
+                        grid_col = grid_col.push(cur_row);
+                    }
+                    col = col.push(container(grid_col).padding([0, 20]));
+                }
+                self.vscroll(col.push(vertical_space().height(24)))
+            }
             LibraryTab::Playlist(idx) => {
                 let name = self
                     .playlists
@@ -7902,6 +8825,29 @@ impl EchoApp {
             .into()
         };
 
+        let mut dev_options = vec![OutputDeviceOption {
+            label: "System Default Device".to_string(),
+            device: None,
+        }];
+        for d in &self.available_audio_devices {
+            dev_options.push(OutputDeviceOption {
+                label: d.clone(),
+                device: Some(d.clone()),
+            });
+        }
+        let cur_dev_option = if let Some(ref d) = self.settings.output_device {
+            dev_options
+                .iter()
+                .find(|o| o.device.as_ref() == Some(d))
+                .cloned()
+                .unwrap_or(OutputDeviceOption {
+                    label: d.clone(),
+                    device: Some(d.clone()),
+                })
+        } else {
+            dev_options[0].clone()
+        };
+
         let repair_btn = if self.repair_running {
             button(text("Stop Volume Repair").size(13))
                 .padding([8, 16])
@@ -8031,6 +8977,64 @@ impl EchoApp {
                 ]
                 .align_y(Alignment::Center),
                 row![
+                    setting_label(
+                        "AutoEQ headphone profile",
+                        "Calibrated Harman target compensation for popular headphones"
+                    ),
+                    horizontal_space(),
+                    pick_list(
+                        &AutoEqProfile::ALL[..],
+                        Some(self.settings.auto_eq_profile),
+                        Message::AutoEqProfileSelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p)),
+                ]
+                .align_y(Alignment::Center),
+                row![
+                    setting_label(
+                        "Playback speed",
+                        "Adjust audio tempo from 0.5× to 2.0×"
+                    ),
+                    horizontal_space(),
+                    row![
+                        button(text("–").size(14).font(bold()))
+                            .padding([4, 10])
+                            .style(icon_button_style(p, false))
+                            .on_press(Message::PlaybackSpeedChanged((self.settings.playback_speed - 0.25).max(0.5))),
+                        container(text(format!("{:.2}×", self.settings.playback_speed)).size(13).font(bold()))
+                            .padding([4, 8]),
+                        button(text("+").size(14).font(bold()))
+                            .padding([4, 10])
+                            .style(icon_button_style(p, false))
+                            .on_press(Message::PlaybackSpeedChanged((self.settings.playback_speed + 0.25).min(2.0))),
+                        button(text("Reset").size(11))
+                            .padding([4, 8])
+                            .style(top_pill_button_style(p, false))
+                            .on_press(Message::PlaybackSpeedChanged(1.0)),
+                    ]
+                    .spacing(4)
+                    .align_y(Alignment::Center),
+                ]
+                .align_y(Alignment::Center),
+                row![
+                    setting_label(
+                        "Audio output device",
+                        "Route playback directly to a DAC, USB interface, or headphones"
+                    ),
+                    horizontal_space(),
+                    pick_list(
+                        dev_options,
+                        Some(cur_dev_option),
+                        |opt| Message::OutputDeviceSelected(opt.device),
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p)),
+                ]
+                .align_y(Alignment::Center),
+                row![
                     repair_btn,
                     text(self.repair_status.as_deref().unwrap_or(""))
                         .size(12)
@@ -8043,6 +9047,117 @@ impl EchoApp {
         )
         .padding(18)
         .style(elevated_card_style(p));
+
+        let eq_freqs = ["32 Hz", "64 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"];
+        let mut eq_sliders_row = row![].spacing(16).align_y(Alignment::Center);
+        for (i, &freq) in eq_freqs.iter().enumerate() {
+            let gain = self.settings.custom_eq_bands[i];
+            let gain_color = if gain.abs() > 0.05 {
+                color_from_rgb(p.primary)
+            } else {
+                muted
+            };
+            let band_col = column![
+                text(format!("{:+.1} dB", gain)).size(10).font(mono()).color(gain_color),
+                slider(-12.0..=12.0, gain, move |val| Message::EqBandChanged(i, val))
+                    .step(0.5_f32)
+                    .style(slim_slider_style(Color::WHITE, color_from_rgb(p.primary)))
+                    .width(72),
+                text(freq).size(10).color(muted),
+            ]
+            .spacing(4)
+            .align_x(Alignment::Center);
+            eq_sliders_row = eq_sliders_row.push(band_col);
+        }
+
+        let eq_card = container(
+            column![
+                row![
+                    column![
+                        text("10-Band Graphic Equalizer").size(17).font(bold()),
+                        text("Precision multi-band gain (-12 dB to +12 dB)").size(12).color(muted),
+                    ]
+                    .spacing(2),
+                    horizontal_space(),
+                    button(text("Reset to Flat").size(12))
+                        .padding([6, 12])
+                        .style(top_pill_button_style(p, false))
+                        .on_press(Message::ResetCustomEq),
+                ]
+                .align_y(Alignment::Center),
+                scrollable(container(eq_sliders_row).padding([6, 2]))
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::new().width(4).scroller_width(3).margin(1)
+                    ))
+                    .style(scroll_style(p)),
+            ]
+            .spacing(12),
+        )
+        .padding(18)
+        .style(elevated_card_style(p));
+
+        let mut excl_col = column![
+            text("Recommendation Exclusions & Snooze").size(17).font(bold()),
+            text("Manage artists and tracks you have instructed Echo not to suggest").size(12).color(muted),
+        ]
+        .spacing(6);
+
+        if self.settings.excluded_artists.is_empty() && self.settings.excluded_tracks.is_empty() {
+            excl_col = excl_col.push(
+                text("No exclusions yet. Use \"Don't suggest this song / artist\" in track context menus to filter recommendations.")
+                    .size(12)
+                    .color(muted)
+            );
+        } else {
+            if !self.settings.excluded_artists.is_empty() {
+                let mut art_chips = row![text("Artists:").size(12).font(bold())].spacing(6).align_y(Alignment::Center);
+                for art in &self.settings.excluded_artists {
+                    let art_name = art.clone();
+                    art_chips = art_chips.push(
+                        container(
+                            row![
+                                text(art).size(11),
+                                button(icons::icon(icons::CLOSE, 10.0, muted))
+                                    .padding(2)
+                                    .style(icon_button_style(p, false))
+                                    .on_press(Message::RemoveExcludedArtist(art_name)),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
+                        )
+                        .padding([3, 8])
+                        .style(search_field_style(p)),
+                    );
+                }
+                excl_col = excl_col.push(art_chips);
+            }
+            if !self.settings.excluded_tracks.is_empty() {
+                let mut track_chips = row![text("Tracks:").size(12).font(bold())].spacing(6).align_y(Alignment::Center);
+                for tid in &self.settings.excluded_tracks {
+                    let track_id = tid.clone();
+                    track_chips = track_chips.push(
+                        container(
+                            row![
+                                text(format!("Track #{tid}")).size(11),
+                                button(icons::icon(icons::CLOSE, 10.0, muted))
+                                    .padding(2)
+                                    .style(icon_button_style(p, false))
+                                    .on_press(Message::RemoveExcludedTrack(track_id)),
+                            ]
+                            .spacing(4)
+                            .align_y(Alignment::Center),
+                        )
+                        .padding([3, 8])
+                        .style(search_field_style(p)),
+                    );
+                }
+                excl_col = excl_col.push(track_chips);
+            }
+        }
+
+        let exclusions_card = container(excl_col)
+            .padding(18)
+            .style(elevated_card_style(p));
 
         let theme_card = container(
             column![
@@ -8464,6 +9579,8 @@ impl EchoApp {
                 container(
                     column![
                         audio_card,
+                        eq_card,
+                        exclusions_card,
                         downloads_cache_card,
                         local_media_card,
                         account_card,
@@ -9163,10 +10280,41 @@ impl EchoApp {
             .style(top_pill_button_style(p, self.settings.romanize_lyrics))
             .on_press(Message::ToggleRomanizeLyrics);
 
+        let share_btn = button(
+            row![
+                icons::icon(icons::SHARE, 12.0, muted),
+                text("Card").size(11).color(muted),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center),
+        )
+        .padding([3, 8])
+        .style(top_pill_button_style(p, false))
+        .on_press(Message::ShareLyricsCard);
+
+        let offset_sec = self.settings.lyrics_offset_ms as f32 / 1000.0;
+        let sync_stepper = row![
+            button(text("–0.5s").size(10))
+                .padding([3, 6])
+                .style(top_pill_button_style(p, false))
+                .on_press(Message::AdjustLyricsOffset(-500)),
+            button(text(if self.settings.lyrics_offset_ms == 0 { "Sync: 0.0s".to_string() } else { format!("Sync: {:+.1}s", offset_sec) }).size(10))
+                .padding([3, 6])
+                .style(top_pill_button_style(p, self.settings.lyrics_offset_ms != 0))
+                .on_press(Message::ResetLyricsOffset),
+            button(text("+0.5s").size(10))
+                .padding([3, 6])
+                .style(top_pill_button_style(p, false))
+                .on_press(Message::AdjustLyricsOffset(500)),
+        ]
+        .spacing(2)
+        .align_y(Alignment::Center);
+
         let is_cinema = active_size >= 24;
 
         if !res.synced.is_empty() {
-            let active_idx = res.active_index(self.position_ms);
+            let calibrated_ms = (self.position_ms as i64 + self.settings.lyrics_offset_ms).max(0) as u64;
+            let active_idx = res.active_index(calibrated_ms);
             let top_pad = if is_cinema {
                 (self.window_size.1 * 0.32).clamp(180.0, 260.0)
             } else {
@@ -9212,7 +10360,7 @@ impl EchoApp {
                     if is_cinema && is_active && !line.words.is_empty() {
                         let mut spans = Vec::with_capacity(line.words.len() * 2);
                         for (wi, w) in line.words.iter().enumerate() {
-                            let sung = self.position_ms >= w.time_ms;
+                            let sung = calibrated_ms >= w.time_ms;
                             let w_color = if sung {
                                 Color::WHITE
                             } else {
@@ -9272,8 +10420,11 @@ impl EchoApp {
                             muted
                         }),
                     horizontal_space(),
+                    sync_stepper,
+                    share_btn,
                     rom_btn,
                 ]
+                .spacing(6)
                 .align_y(Alignment::Center),
                 scrollable(lines_col)
                     .id(self.lyrics_scroll_id.clone())
@@ -9645,6 +10796,26 @@ impl EchoApp {
                     .style(divider_style(0.08)),
             )
             .push(horizontal_space().width(2))
+            .push(self.with_tooltip(
+                button(icons::icon(
+                    icons::CAST,
+                    16.0,
+                    if self.active_cast_device.is_some() {
+                        accent
+                    } else {
+                        muted
+                    },
+                ))
+                .padding(7)
+                .style(icon_button_style(p, self.active_cast_device.is_some()))
+                .on_press(Message::ToggleCastModal),
+                if let Some(ref d) = self.active_cast_device {
+                    format!("Casting to {} (Click to change)", d.name)
+                } else {
+                    "Cast audio (Chromecast / DLNA / FCast)".to_string()
+                },
+                tooltip::Position::Top,
+            ))
             .push(self.with_tooltip(
                 button(icons::icon(icons::MINI_PLAYER, 16.0, muted))
                     .padding(7)
