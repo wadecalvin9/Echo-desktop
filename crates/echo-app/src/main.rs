@@ -53,6 +53,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+fn load_app_icon() -> Option<iced::window::Icon> {
+    const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.png");
+    let img = ::image::load_from_memory(ICON_BYTES).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    iced::window::icon::from_rgba(img.into_raw(), width, height).ok()
+}
+
 pub fn main() -> iced::Result {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -64,8 +71,12 @@ pub fn main() -> iced::Result {
     iced::application("Echo", EchoApp::update, EchoApp::view)
         .theme(EchoApp::theme)
         .subscription(EchoApp::subscription)
-        .window_size((1360.0, 840.0))
-        .decorations(false)
+        .window(iced::window::Settings {
+            size: iced::Size::new(1360.0, 840.0),
+            decorations: false,
+            icon: load_app_icon(),
+            ..Default::default()
+        })
         .run_with(EchoApp::new)
 }
 
@@ -4600,7 +4611,7 @@ impl EchoApp {
         let can_fwd = !self.nav_forward.is_empty();
 
         let mut nav_arrows = row![
-            container(icons::icon(icons::ECHO_MARK, 16.0, Color::BLACK))
+            container(icons::icon(icons::ECHO_MARK, 16.0, Color::WHITE))
                 .width(28)
                 .height(28)
                 .align_x(iced::alignment::Horizontal::Center)
@@ -10577,7 +10588,7 @@ impl EchoApp {
             // Ultra-compact floating mini player
             let drag_header = mouse_area(
                 row![
-                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::BLACK))
+                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::WHITE))
                         .width(20)
                         .height(20)
                         .align_x(iced::alignment::Horizontal::Center)
@@ -10711,7 +10722,7 @@ impl EchoApp {
             // Fullscreen or wide split dock
             let drag_header = mouse_area(
                 row![
-                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::BLACK))
+                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::WHITE))
                         .width(20)
                         .height(20)
                         .align_x(iced::alignment::Horizontal::Center)
@@ -10840,7 +10851,7 @@ impl EchoApp {
             // Narrow vertical sidebar dock (e.g. snapped to side on a narrow column)
             let drag_header = mouse_area(
                 row![
-                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::BLACK))
+                    container(icons::icon(icons::ECHO_MARK, 12.0, Color::WHITE))
                         .width(20)
                         .height(20)
                         .align_x(iced::alignment::Horizontal::Center)

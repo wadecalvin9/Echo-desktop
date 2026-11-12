@@ -537,18 +537,22 @@ pub fn pager_button_style(
 }
 
 pub fn logo_badge_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Color(color_from_rgb(p.primary))),
-        text_color: Some(Color::BLACK),
-        border: Border {
-            radius: 999.0.into(),
-            ..Default::default()
-        },
-        shadow: Shadow {
-            color: Color::from_rgba(0.0, 0.0, 0.0, 0.50),
-            offset: Vector::new(0.0, 6.0),
-            blur_radius: 16.0,
-        },
+    move |_| {
+        let _ = p;
+        container::Style {
+            background: Some(Background::Color(Color::from_rgb(0.04, 0.04, 0.05))),
+            text_color: Some(Color::WHITE),
+            border: Border {
+                radius: 7.0.into(),
+                width: 1.0,
+                color: Color::from_rgba(1.0, 1.0, 1.0, 0.12),
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 6.0,
+            },
+        }
     }
 }
 
