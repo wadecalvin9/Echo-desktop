@@ -435,6 +435,36 @@ impl std::fmt::Display for OutputDeviceOption {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SettingsSection {
+    #[default]
+    All,
+    AudioDsp,
+    LibraryMedia,
+    Accounts,
+    AppearanceSystem,
+}
+
+impl SettingsSection {
+    pub const ALL: [Self; 5] = [
+        Self::All,
+        Self::AudioDsp,
+        Self::LibraryMedia,
+        Self::Accounts,
+        Self::AppearanceSystem,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::All => "All Settings",
+            Self::AudioDsp => "Audio & DSP",
+            Self::LibraryMedia => "Library & Storage",
+            Self::Accounts => "Accounts & Sync",
+            Self::AppearanceSystem => "Appearance & System",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RightTab {
     Now,
@@ -724,8 +754,10 @@ enum Message {
     AutoEqProfileSelected(AutoEqProfile),
     EqBandChanged(usize, f32),
     ResetCustomEq,
+    ApplyCustomEqCurve([f32; 10]),
     PlaybackSpeedChanged(f32),
     OutputDeviceSelected(Option<String>),
+    SelectSettingsSection(SettingsSection),
 
     // Lyrics Calibration & Share
     AdjustLyricsOffset(i64),
@@ -916,6 +948,7 @@ struct EchoApp {
     cast_scanning: bool,
     cast_address_input: String,
     available_audio_devices: Vec<String>,
+    settings_section: SettingsSection,
 }
 
 impl EchoApp {
@@ -1085,6 +1118,7 @@ impl EchoApp {
             cast_scanning: false,
             cast_address_input: String::new(),
             available_audio_devices,
+            settings_section: SettingsSection::All,
         };
 
         app.refresh_db_views();
@@ -4248,6 +4282,18 @@ impl EchoApp {
                 self.audio.set_eq_bands(self.settings.custom_eq_bands);
                 let _ = self.settings.save();
                 self.set_toast("Equalizer reset to Flat (0 dB)");
+                Task::none()
+            }
+            Message::ApplyCustomEqCurve(bands) => {
+                self.settings.custom_eq_bands = bands;
+                self.settings.auto_eq_profile = AutoEqProfile::None;
+                self.audio.set_eq_bands(bands);
+                let _ = self.settings.save();
+                self.set_toast("Equalizer curve applied");
+                Task::none()
+            }
+            Message::SelectSettingsSection(sec) => {
+                self.settings_section = sec;
                 Task::none()
             }
             Message::PlaybackSpeedChanged(speed) => {
@@ -8799,29 +8845,89 @@ impl EchoApp {
         .into()
     }
 
+    fn settings_row<'a>(
+        &self,
+        title: &'static str,
+        hint: &'static str,
+        control: Element<'a, Message>,
+    ) -> Element<'a, Message> {
+        let muted = color_from_rgb(self.palette.text_muted);
+        row![
+            column![
+                text(title).size(13).font(bold()),
+                text(hint).size(11).color(muted),
+            ]
+            .spacing(2),
+            horizontal_space(),
+            control,
+        ]
+        .align_y(Alignment::Center)
+        .into()
+    }
+
     fn view_settings(&self) -> Element<'_, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
 
         let header = container(
             column![
-                text("Settings").size(30).font(bold()),
-                text("Audio engine, local media library, appearance, and connected accounts")
-                    .size(13)
-                    .color(muted),
+                row![
+                    container(icons::icon(icons::SETTINGS, 22.0, Color::BLACK))
+                        .width(42)
+                        .height(42)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center)
+                        .style(logo_badge_style(p)),
+                    column![
+                        text("Settings").size(24).font(bold()),
+                        text("Audio engine & DSP, library media indexing, account sync, and appearance")
+                            .size(12)
+                            .color(muted),
+                    ]
+                    .spacing(2),
+                ]
+                .spacing(14)
+                .align_y(Alignment::Center),
+                row(
+                    SettingsSection::ALL.iter().map(|&sec| {
+                        let active = self.settings_section == sec;
+                        button(text(sec.label()).size(12).font(if active { bold() } else { Font::DEFAULT }))
+                            .padding([6, 14])
+                            .style(top_pill_button_style(p, active))
+                            .on_press(Message::SelectSettingsSection(sec))
+                            .into()
+                    })
+                )
+                .spacing(8)
+                .align_y(Alignment::Center),
             ]
-            .spacing(4),
+            .spacing(16),
         )
-        .padding([22, 24])
+        .padding([20, 24])
         .width(Length::Fill)
         .style(hero_banner_style(p));
 
-        let setting_label = |title: &'static str, hint: &'static str| -> Element<'_, Message> {
-            column![
-                text(title).size(14).font(bold()),
-                text(hint).size(12).color(muted),
+        let row_divider = || -> Element<'static, Message> {
+            container(horizontal_space())
+                .height(1)
+                .width(Length::Fill)
+                .style(divider_style(0.04))
+                .into()
+        };
+
+        let card_header = |icon_bytes: &'static [u8], title: &'static str, subtitle: &'static str| -> Element<'_, Message> {
+            row![
+                container(icons::icon(icon_bytes, 16.0, color_from_rgb(p.primary)))
+                    .padding(6)
+                    .style(badge_pill_style(p)),
+                column![
+                    text(title).size(16).font(bold()),
+                    text(subtitle).size(11).color(muted),
+                ]
+                .spacing(1),
             ]
-            .spacing(2)
+            .spacing(10)
+            .align_y(Alignment::Center)
             .into()
         };
 
@@ -8848,124 +8954,28 @@ impl EchoApp {
             dev_options[0].clone()
         };
 
-        let repair_btn = if self.repair_running {
-            button(text("Stop Volume Repair").size(13))
-                .padding([8, 16])
-                .style(top_pill_button_style(p, false))
-                .on_press(Message::StopFixVolumes)
-        } else {
-            button(text(format!(
-                "Fix Song Volumes ({} missing)",
-                self.missing_loudness_count
-            )).size(13))
-            .padding([8, 16])
-            .style(top_pill_button_style(p, false))
-            .on_press(Message::StartFixVolumes)
-        };
-
-        let audio_card = container(
+        // --- Card 1: Audio Output & Playback ---
+        let audio_output_card = container(
             column![
-                text("Player & Audio").size(17).font(bold()),
-                row![
-                    setting_label(
-                        "Audio normalization",
-                        "Level tracks to -3 dB reference loudness"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.audio_normalization)
-                        .style(toggler_style(p))
-                        .on_toggle(Message::ToggleNormalization),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Skip silence",
-                        "Automatically trim quiet passages during playback"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.skip_silence)
-                        .style(toggler_style(p))
-                        .on_toggle(Message::ToggleSkipSilence),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Better Lyrics (TTML)",
-                        "Prefer word/line-synced timing when available"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.better_lyrics_enabled)
-                        .style(toggler_style(p))
-                        .on_toggle(Message::ToggleBetterLyrics),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Romanize lyrics",
-                        "Show Latin transliteration below Japanese and Korean lyric lines"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.romanize_lyrics)
-                        .style(toggler_style(p))
-                        .on_toggle(|_| Message::ToggleRomanizeLyrics),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Auto-load Up Next",
-                        "Queue similar radio tracks automatically when playback nears the end"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.auto_load_more)
-                        .style(toggler_style(p))
-                        .on_toggle(Message::ToggleAutoLoadMore),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Transition fade",
-                        "Smooth fade-in/out on automatic track advance"
-                    ),
-                    horizontal_space(),
+                card_header(icons::SPEAKER, "Audio Output & Playback", "Device routing, bitrates, speed adjustment, and transitions"),
+                row_divider(),
+                self.settings_row(
+                    "Audio output device",
+                    "Route playback directly to a dedicated DAC, USB interface, or headphones",
                     pick_list(
-                        &TransitionFadeOption::ALL[..],
-                        Some(TransitionFadeOption::from_ms(self.settings.transition_fade_ms)),
-                        Message::TransitionFadeSelected,
+                        dev_options,
+                        Some(cur_dev_option),
+                        |opt| Message::OutputDeviceSelected(opt.device),
                     )
                     .padding([7, 14])
                     .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label("Equalizer preset", "3-band tonal shaping"),
-                    horizontal_space(),
-                    pick_list(
-                        &EqPreset::ALL[..],
-                        Some(self.settings.eq_preset),
-                        Message::EqPresetSelected,
-                    )
-                    .padding([7, 14])
-                    .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label("Spatial audio", "Stereo widening and room ambience"),
-                    horizontal_space(),
-                    pick_list(
-                        &SpatialMode::ALL[..],
-                        Some(self.settings.spatial_mode),
-                        Message::SpatialModeSelected,
-                    )
-                    .padding([7, 14])
-                    .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label("Streaming quality", "Preferred audio bitrate from YouTube Music"),
-                    horizontal_space(),
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Streaming quality",
+                    "Preferred audio bitrate streamed from YouTube Music",
                     pick_list(
                         &AudioQuality::ALL[..],
                         Some(self.settings.audio_quality),
@@ -8973,31 +8983,13 @@ impl EchoApp {
                     )
                     .padding([7, 14])
                     .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "AutoEQ headphone profile",
-                        "Calibrated Harman target compensation for popular headphones"
-                    ),
-                    horizontal_space(),
-                    pick_list(
-                        &AutoEqProfile::ALL[..],
-                        Some(self.settings.auto_eq_profile),
-                        Message::AutoEqProfileSelected,
-                    )
-                    .padding([7, 14])
-                    .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Playback speed",
-                        "Adjust audio tempo from 0.5× to 2.0×"
-                    ),
-                    horizontal_space(),
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Playback speed",
+                    "Adjust audio tempo from 0.5× to 2.0×",
                     row![
                         button(text("–").size(14).font(bold()))
                             .padding([4, 10])
@@ -9010,43 +9002,129 @@ impl EchoApp {
                             .style(icon_button_style(p, false))
                             .on_press(Message::PlaybackSpeedChanged((self.settings.playback_speed + 0.25).min(2.0))),
                         button(text("Reset").size(11))
-                            .padding([4, 8])
-                            .style(top_pill_button_style(p, false))
+                            .padding([4, 10])
+                            .style(outlined_pill_button_style(p, false))
                             .on_press(Message::PlaybackSpeedChanged(1.0)),
                     ]
                     .spacing(4)
-                    .align_y(Alignment::Center),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Audio output device",
-                        "Route playback directly to a DAC, USB interface, or headphones"
-                    ),
-                    horizontal_space(),
+                    .align_y(Alignment::Center)
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Transition fade",
+                    "Smooth crossfade when advancing between consecutive tracks",
                     pick_list(
-                        dev_options,
-                        Some(cur_dev_option),
-                        |opt| Message::OutputDeviceSelected(opt.device),
+                        &TransitionFadeOption::ALL[..],
+                        Some(TransitionFadeOption::from_ms(self.settings.transition_fade_ms)),
+                        Message::TransitionFadeSelected,
                     )
                     .padding([7, 14])
                     .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    repair_btn,
-                    text(self.repair_status.as_deref().unwrap_or(""))
-                        .size(12)
-                        .color(muted)
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center),
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Audio normalization",
+                    "Level track volumes to -3 dB reference loudness across songs",
+                    toggler(self.settings.audio_normalization)
+                        .style(toggler_style(p))
+                        .on_toggle(Message::ToggleNormalization)
+                        .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Skip silence",
+                    "Automatically trim quiet introductory gaps and dead air",
+                    toggler(self.settings.skip_silence)
+                        .style(toggler_style(p))
+                        .on_toggle(Message::ToggleSkipSilence)
+                        .into(),
+                ),
             ]
-            .spacing(14),
+            .spacing(12),
         )
-        .padding(18)
+        .padding(20)
         .style(elevated_card_style(p));
+
+        // --- Card 2: AutoEQ & Harman DSP ---
+        let autoeq_dsp_card = container(
+            column![
+                card_header(icons::EQ_BARS, "Harman Tuning & Spatial DSP", "Calibrated headphone compensation curves and stereo room widening"),
+                row_divider(),
+                self.settings_row(
+                    "AutoEQ headphone profile",
+                    "Target frequency response curve for popular audiophile headphones",
+                    pick_list(
+                        &AutoEqProfile::ALL[..],
+                        Some(self.settings.auto_eq_profile),
+                        Message::AutoEqProfileSelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Spatial audio engine",
+                    "Binaural stereo widening and simulated room acoustics",
+                    pick_list(
+                        &SpatialMode::ALL[..],
+                        Some(self.settings.spatial_mode),
+                        Message::SpatialModeSelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Equalizer 3-band preset",
+                    "Quick low / mid / high tonal shaping preset",
+                    pick_list(
+                        &EqPreset::ALL[..],
+                        Some(self.settings.eq_preset),
+                        Message::EqPresetSelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+            ]
+            .spacing(12),
+        )
+        .padding(20)
+        .style(elevated_card_style(p));
+
+        // --- Card 3: 10-Band Studio Graphic Equalizer ---
+        let eq_curves: [(&'static str, [f32; 10]); 5] = [
+            ("Flat", [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            ("Bass Boost", [5.5, 5.0, 4.0, 2.5, 1.0, 0.0, 0.0, 0.5, 1.0, 1.5]),
+            ("Treble Boost", [0.0, 0.0, 0.0, 0.5, 1.0, 2.0, 3.5, 5.0, 6.0, 6.5]),
+            ("Vocal", [-1.0, -0.5, 0.0, 1.0, 2.5, 3.5, 3.0, 1.5, 0.5, 0.0]),
+            ("Electronic", [4.5, 4.0, 2.0, 0.0, -1.0, 1.0, 2.0, 3.5, 4.0, 4.5]),
+        ];
+
+        let mut curve_pills = row![text("Studio Curves:").size(12).font(bold()).color(muted)].spacing(6).align_y(Alignment::Center);
+        for (name, curve_bands) in eq_curves {
+            curve_pills = curve_pills.push(
+                button(text(name).size(11))
+                    .padding([4, 10])
+                    .style(outlined_pill_button_style(p, false))
+                    .on_press(Message::ApplyCustomEqCurve(curve_bands))
+            );
+        }
+        curve_pills = curve_pills.push(horizontal_space());
+        curve_pills = curve_pills.push(
+            button(text("Reset").size(11))
+                .padding([4, 10])
+                .style(top_pill_button_style(p, false))
+                .on_press(Message::ResetCustomEq)
+        );
 
         let eq_freqs = ["32 Hz", "64 Hz", "125 Hz", "250 Hz", "500 Hz", "1 kHz", "2 kHz", "4 kHz", "8 kHz", "16 kHz"];
         let mut eq_sliders_row = row![].spacing(16).align_y(Alignment::Center);
@@ -9070,21 +9148,11 @@ impl EchoApp {
             eq_sliders_row = eq_sliders_row.push(band_col);
         }
 
-        let eq_card = container(
+        let custom_eq_card = container(
             column![
-                row![
-                    column![
-                        text("10-Band Graphic Equalizer").size(17).font(bold()),
-                        text("Precision multi-band gain (-12 dB to +12 dB)").size(12).color(muted),
-                    ]
-                    .spacing(2),
-                    horizontal_space(),
-                    button(text("Reset to Flat").size(12))
-                        .padding([6, 12])
-                        .style(top_pill_button_style(p, false))
-                        .on_press(Message::ResetCustomEq),
-                ]
-                .align_y(Alignment::Center),
+                card_header(icons::EQ_BARS, "10-Band Studio Graphic Equalizer", "Precision multi-band gain calibration (-12 dB to +12 dB)"),
+                curve_pills,
+                row_divider(),
                 scrollable(container(eq_sliders_row).padding([6, 2]))
                     .direction(scrollable::Direction::Horizontal(
                         scrollable::Scrollbar::new().width(4).scroller_width(3).margin(1)
@@ -9093,24 +9161,20 @@ impl EchoApp {
             ]
             .spacing(12),
         )
-        .padding(18)
+        .padding(20)
         .style(elevated_card_style(p));
 
-        let mut excl_col = column![
-            text("Recommendation Exclusions & Snooze").size(17).font(bold()),
-            text("Manage artists and tracks you have instructed Echo not to suggest").size(12).color(muted),
-        ]
-        .spacing(6);
-
+        // --- Card 4: Lyrics & Smart Radio ---
+        let mut excl_chips = column![].spacing(8);
         if self.settings.excluded_artists.is_empty() && self.settings.excluded_tracks.is_empty() {
-            excl_col = excl_col.push(
+            excl_chips = excl_chips.push(
                 text("No exclusions yet. Use \"Don't suggest this song / artist\" in track context menus to filter recommendations.")
                     .size(12)
                     .color(muted)
             );
         } else {
             if !self.settings.excluded_artists.is_empty() {
-                let mut art_chips = row![text("Artists:").size(12).font(bold())].spacing(6).align_y(Alignment::Center);
+                let mut art_chips = row![text("Excluded Artists:").size(11).font(bold()).color(muted)].spacing(6).align_y(Alignment::Center);
                 for art in &self.settings.excluded_artists {
                     let art_name = art.clone();
                     art_chips = art_chips.push(
@@ -9129,10 +9193,10 @@ impl EchoApp {
                         .style(search_field_style(p)),
                     );
                 }
-                excl_col = excl_col.push(art_chips);
+                excl_chips = excl_chips.push(art_chips);
             }
             if !self.settings.excluded_tracks.is_empty() {
-                let mut track_chips = row![text("Tracks:").size(12).font(bold())].spacing(6).align_y(Alignment::Center);
+                let mut track_chips = row![text("Excluded Tracks:").size(11).font(bold()).color(muted)].spacing(6).align_y(Alignment::Center);
                 for tid in &self.settings.excluded_tracks {
                     let track_id = tid.clone();
                     track_chips = track_chips.push(
@@ -9151,55 +9215,396 @@ impl EchoApp {
                         .style(search_field_style(p)),
                     );
                 }
-                excl_col = excl_col.push(track_chips);
+                excl_chips = excl_chips.push(track_chips);
             }
         }
 
-        let exclusions_card = container(excl_col)
-            .padding(18)
-            .style(elevated_card_style(p));
-
-        let theme_card = container(
+        let smart_features_card = container(
             column![
-                text("Appearance & Recognition").size(17).font(bold()),
-                row![
-                    setting_label(
-                        "Theme mode",
-                        "Dynamic extracts ambient palette colors from cover art"
-                    ),
-                    horizontal_space(),
-                    pick_list(
-                        &ThemeMode::ALL[..],
-                        Some(self.settings.theme_mode),
-                        Message::ThemeModeSelected,
-                    )
-                    .padding([7, 14])
-                    .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
+                card_header(icons::LYRICS, "Lyrics & Discovery Radio", "Word-synced lyric engines, transliteration, and exclusion filters"),
+                row_divider(),
+                self.settings_row(
+                    "Better Lyrics (TTML)",
+                    "Prefer rich word/line-synced timing from LRCLIB and TTML",
+                    toggler(self.settings.better_lyrics_enabled)
+                        .style(toggler_style(p))
+                        .on_toggle(Message::ToggleBetterLyrics)
+                        .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Romanize Asian lyrics",
+                    "Display Latin transliteration beneath Japanese, Korean, and Chinese lyric lines",
+                    toggler(self.settings.romanize_lyrics)
+                        .style(toggler_style(p))
+                        .on_toggle(|_| Message::ToggleRomanizeLyrics)
+                        .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Auto-load Up Next radio",
+                    "Continuously queue similar recommended tracks when reaching the queue tail",
+                    toggler(self.settings.auto_load_more)
+                        .style(toggler_style(p))
+                        .on_toggle(Message::ToggleAutoLoadMore)
+                        .into(),
+                ),
+                row_divider(),
+                column![
+                    text("Recommendation Exclusions & Snooze").size(13).font(bold()),
+                    excl_chips,
                 ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Recognition audio input",
-                        "System loopback or microphone capture for Shazam"
-                    ),
-                    horizontal_space(),
-                    pick_list(
-                        &RecognitionSource::ALL[..],
-                        Some(self.settings.recognition_source),
-                        Message::RecognitionSourceSelected,
-                    )
-                    .padding([7, 14])
-                    .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
+                .spacing(6),
             ]
-            .spacing(14),
+            .spacing(12),
         )
-        .padding(18)
+        .padding(20)
         .style(elevated_card_style(p));
 
+        // --- Card 5: Downloads & Streaming Cache Visualizer ---
+        let cache_mb_used = self.cache_stats.1 as f64 / (1024.0 * 1024.0);
+        let max_cache_mb = self.settings.max_cache_size_mb as f64;
+        let cache_pct = if max_cache_mb > 0.0 {
+            (cache_mb_used / max_cache_mb).clamp(0.0, 1.0) as f32
+        } else {
+            0.0
+        };
+        let fill_portion = ((cache_pct * 100.0).round() as u16).max(1);
+        let empty_portion = 100u16.saturating_sub(fill_portion);
+
+        let folder_btn = |label: &'static str, target: FolderTarget| -> Element<'_, Message> {
+            button(
+                row![
+                    icons::icon(icons::FOLDER, 14.0, muted),
+                    text(label).size(12),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([8, 14])
+            .style(outlined_pill_button_style(p, false))
+            .on_press(Message::PickFolder(target))
+            .into()
+        };
+
+        let dl_default_hint = self
+            .settings
+            .effective_downloads_dir()
+            .map(|d| d.display().to_string())
+            .unwrap_or_else(|_| "Echo Downloads".to_string());
+
+        let storage_meter = column![
+            row![
+                text(format!(
+                    "Streaming Cache: {} cached streams • {:.1} MB of {} MB ({:.0}%)",
+                    self.cache_stats.0, cache_mb_used, self.settings.max_cache_size_mb, cache_pct * 100.0
+                ))
+                .size(12)
+                .color(muted),
+                horizontal_space(),
+                text_input("512", &self.cache_size_input)
+                    .style(pill_search_input_style(p))
+                    .padding([6, 12])
+                    .width(80)
+                    .on_input(Message::MaxCacheSizeChanged),
+                button(text("Clear Cache").size(11))
+                    .padding([6, 12])
+                    .style(outlined_pill_button_style(p, false))
+                    .on_press(Message::ClearStreamCache),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            container(
+                row![
+                    container(horizontal_space())
+                        .width(Length::FillPortion(fill_portion))
+                        .height(6)
+                        .style(stat_bar_fill_style(color_from_rgb(p.primary), 999.0)),
+                    container(horizontal_space())
+                        .width(Length::FillPortion(empty_portion))
+                        .height(6),
+                ]
+            )
+            .width(Length::Fill)
+            .height(6)
+            .style(stat_bar_track_style()),
+        ]
+        .spacing(8);
+
+        let downloads_cache_card = container(
+            column![
+                card_header(icons::DOWNLOAD, "Storage & Stream Cache", "Local stream buffer limits, disk usage, and offline download folders"),
+                storage_meter,
+                row_divider(),
+                column![
+                    text(format!("Active download folder: {dl_default_hint}")).size(12).color(muted),
+                    row![
+                        text_input("Custom download folder (blank = default)", &self.download_folder_input)
+                            .style(pill_search_input_style(p))
+                            .padding([9, 14])
+                            .on_input(Message::DownloadFolderChanged)
+                            .on_submit(Message::SaveDownloadSettings)
+                            .width(Length::Fill),
+                        folder_btn("Browse", FolderTarget::DownloadFolder),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(6),
+                row_divider(),
+                column![
+                    text("Extra import folders containing [youtube_id] files (semicolon-separated):").size(12).color(muted),
+                    row![
+                        text_input(
+                            "e.g. D:/Music/Echo; E:/Backup/Tracks",
+                            &self.extra_import_input
+                        )
+                        .style(pill_search_input_style(p))
+                        .padding([9, 14])
+                        .on_input(Message::ExtraImportFoldersChanged)
+                        .on_submit(Message::SaveDownloadSettings)
+                        .width(Length::Fill),
+                        folder_btn("Add", FolderTarget::ExtraImportFolder),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(6),
+                row_divider(),
+                row![
+                    button(text("Save Folders").size(13).font(bold()))
+                        .padding([8, 16])
+                        .style(top_pill_button_style(p, true))
+                        .on_press(Message::SaveDownloadSettings),
+                    button(text("Rescan [id] Folders").size(13))
+                        .padding([8, 14])
+                        .style(top_pill_button_style(p, false))
+                        .on_press(Message::ScanDownloadFolders),
+                    button(text("Migrate Downloads").size(13))
+                        .padding([8, 14])
+                        .style(top_pill_button_style(p, false))
+                        .on_press(Message::MigrateDownloads),
+                    horizontal_space(),
+                    if let Some(st) = &self.download_status {
+                        text(st).size(12).color(color_from_rgb(p.primary))
+                    } else {
+                        text("").size(1)
+                    },
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(12),
+        )
+        .padding(20)
+        .style(elevated_card_style(p));
+
+        // --- Card 6: Local Media Library ---
+        let local_media_card = container(
+            column![
+                card_header(icons::FOLDER, "Local Music Library", "Index and match offline .flac, .mp3, .m4a, and .opus files"),
+                row_divider(),
+                column![
+                    text("Music folders to scan:").size(12).color(muted),
+                    row![
+                        text_input(
+                            "e.g. C:/Users/Name/Music; D:/FLACs",
+                            &self.local_folders_input
+                        )
+                        .style(pill_search_input_style(p))
+                        .padding([9, 14])
+                        .on_input(Message::LocalFoldersChanged)
+                        .on_submit(Message::ScanLocalMedia)
+                        .width(Length::Fill),
+                        folder_btn("Add", FolderTarget::LocalMediaFolder),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(6),
+                row_divider(),
+                column![
+                    text("Excluded folders from indexer:").size(12).color(muted),
+                    row![
+                        text_input(
+                            "e.g. C:/Users/Name/Music/Podcasts",
+                            &self.excluded_folders_input
+                        )
+                        .style(pill_search_input_style(p))
+                        .padding([9, 14])
+                        .on_input(Message::ExcludedFoldersChanged)
+                        .width(Length::Fill),
+                        folder_btn("Add", FolderTarget::ExcludedMediaFolder),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                ]
+                .spacing(6),
+                row_divider(),
+                self.settings_row(
+                    "Deduplication sensitivity",
+                    "Strictness when matching local audio against cloud streaming tracks",
+                    pick_list(
+                        &ScannerSensitivity::ALL[..],
+                        Some(self.settings.scanner_sensitivity),
+                        Message::ScannerSensitivitySelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Strict filenames",
+                    "Do not guess missing artist/title metadata from file names",
+                    toggler(self.settings.strict_file_names)
+                        .style(toggler_style(p))
+                        .on_toggle(Message::ToggleStrictFileNames)
+                        .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Auto-rescan on startup",
+                    "Automatically check local folders for new tracks when Echo launches",
+                    toggler(self.settings.auto_scan_local_on_startup)
+                        .style(toggler_style(p))
+                        .on_toggle(Message::ToggleAutoScanLocal)
+                        .into(),
+                ),
+                row_divider(),
+                row![
+                    button(text(if self.local_scanning {
+                        "Scanning..."
+                    } else {
+                        "Scan Local Media Now"
+                    }).size(13).font(bold()))
+                    .padding([8, 16])
+                    .style(top_pill_button_style(p, true))
+                    .on_press(Message::ScanLocalMedia),
+                    horizontal_space(),
+                    text(self.local_scan_status.as_deref().unwrap_or(""))
+                        .size(12)
+                        .color(muted),
+                ]
+                .spacing(12)
+                .align_y(Alignment::Center),
+            ]
+            .spacing(12),
+        )
+        .padding(20)
+        .style(elevated_card_style(p));
+
+        // --- Card 7: YouTube Music Account & Sync ---
+        let has_cookie = self.yt.has_cookie();
+        let yt_status_badge = container(
+            row![
+                container(horizontal_space())
+                    .width(8)
+                    .height(8)
+                    .style(stat_bar_fill_style(
+                        if has_cookie { color_from_rgb(p.primary) } else { muted },
+                        999.0
+                    )),
+                text(if has_cookie { "Authenticated Account" } else { "Anonymous Guest Mode" })
+                    .size(11)
+                    .font(bold())
+                    .color(if has_cookie { color_from_rgb(p.primary) } else { muted }),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center)
+        )
+        .padding([4, 10])
+        .style(search_field_style(p));
+
+        let account_card = container(
+            column![
+                row![
+                    card_header(icons::USER, "YouTube Music Account & Catalog", "Synchronize personal playlists, liked songs, and configure catalog region"),
+                    horizontal_space(),
+                    yt_status_badge,
+                ]
+                .align_y(Alignment::Center),
+                row_divider(),
+                column![
+                    text("Paste your music.youtube.com Cookie header (SAPISID=...; __Secure-3PAPISID=...):")
+                        .size(12)
+                        .color(muted),
+                    text_input("Cookie header string", &self.yt_cookie_input)
+                        .style(pill_search_input_style(p))
+                        .padding([9, 14])
+                        .secure(true)
+                        .on_input(Message::YouTubeCookieChanged)
+                        .on_submit(Message::SaveYouTubeCookie),
+                ]
+                .spacing(6),
+                row![
+                    button(text("Save Cookie").size(13).font(bold()))
+                        .padding([8, 16])
+                        .style(top_pill_button_style(p, true))
+                        .on_press(Message::SaveYouTubeCookie),
+                    button(text(if self.account_syncing {
+                        "Syncing..."
+                    } else {
+                        "Sync Playlists & Likes"
+                    }).size(13))
+                        .padding([8, 16])
+                        .style(top_pill_button_style(p, false))
+                        .on_press(Message::SyncYouTubeAccount),
+                    button(text("Clear Cookie").size(13))
+                        .padding([8, 14])
+                        .style(outlined_pill_button_style(p, false))
+                        .on_press(Message::ClearYouTubeCookie),
+                    horizontal_space(),
+                    text(
+                        self.account_sync_status
+                            .as_deref()
+                            .unwrap_or(if has_cookie {
+                                "Connected to personal YouTube Music account"
+                            } else {
+                                "Not logged in"
+                            })
+                    )
+                    .size(12)
+                    .color(if has_cookie { color_from_rgb(p.primary) } else { muted }),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+                row_divider(),
+                self.settings_row(
+                    "Content catalog region",
+                    "Country storefront used for Home mixes, charts, and recommendations",
+                    pick_list(
+                        &YoutubeRegionOption::ALL[..],
+                        Some(YoutubeRegionOption::from_code(&self.settings.youtube_gl)),
+                        Message::YoutubeRegionSelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Catalog display language",
+                    "Language used by YouTube Music for artist bios, track names, and genres",
+                    pick_list(
+                        &YoutubeLanguageOption::ALL[..],
+                        Some(YoutubeLanguageOption::from_code(&self.settings.youtube_hl)),
+                        Message::YoutubeLanguageSelected,
+                    )
+                    .padding([7, 14])
+                    .style(pick_list_style(p))
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+            ]
+            .spacing(12),
+        )
+        .padding(20)
+        .style(elevated_card_style(p));
+
+        // --- Card 8: Last.fm Scrobbler ---
         let lastfm_controls: Element<'_, Message> = if let Some(user) = &self.settings.lastfm_username {
             row![
                 text(format!("Signed in as {user}"))
@@ -9240,7 +9645,8 @@ impl EchoApp {
 
         let lastfm_card = container(
             column![
-                text("Last.fm Scrobbling").size(17).font(bold()),
+                card_header(icons::STATS, "Last.fm Scrobbler", "Track your listening statistics and scrobble plays to your Last.fm profile"),
+                row_divider(),
                 row![
                     text_input("Last.fm API Key", &self.settings.lastfm_api_key)
                         .style(pill_search_input_style(p))
@@ -9262,338 +9668,160 @@ impl EchoApp {
             ]
             .spacing(12),
         )
-        .padding(18)
+        .padding(20)
         .style(elevated_card_style(p));
 
-        let account_card = container(
+        // --- Card 9: Appearance & Recognition ---
+        let appearance_card = container(
             column![
-                text("YouTube Music Account & Sync").size(17).font(bold()),
-                text(
-                    "Paste your music.youtube.com Cookie header to sync library playlists, liked songs, subscriptions, and play history."
-                )
-                .size(12)
-                .color(muted),
-                text_input("Cookie (SAPISID=...; __Secure-3PAPISID=...)", &self.yt_cookie_input)
-                    .style(pill_search_input_style(p))
-                    .padding([9, 14])
-                    .secure(true)
-                    .on_input(Message::YouTubeCookieChanged)
-                    .on_submit(Message::SaveYouTubeCookie),
-                row![
-                    button(text("Save Cookie").size(13).font(bold()))
-                        .padding([8, 16])
-                        .style(top_pill_button_style(p, true))
-                        .on_press(Message::SaveYouTubeCookie),
-                    button(text(if self.account_syncing {
-                        "Syncing..."
-                    } else {
-                        "Sync Playlists & Likes"
-                    }).size(13))
-                        .padding([8, 16])
-                        .style(top_pill_button_style(p, false))
-                        .on_press(Message::SyncYouTubeAccount),
-                    button(text("Clear").size(13))
-                        .padding([8, 14])
-                        .style(outlined_pill_button_style(p, false))
-                        .on_press(Message::ClearYouTubeCookie),
-                ]
-                .spacing(10),
-                row![
-                    setting_label(
-                        "Content region",
-                        "Country catalog used for Home feed, Explore, and charts"
-                    ),
-                    horizontal_space(),
+                card_header(icons::SETTINGS, "Appearance & Recognition", "Visual styling, ambient artwork palettes, and acoustic recognition input"),
+                row_divider(),
+                self.settings_row(
+                    "Theme mode",
+                    "Dynamic extracts ambient palette colors directly from active album artwork",
                     pick_list(
-                        &YoutubeRegionOption::ALL[..],
-                        Some(YoutubeRegionOption::from_code(&self.settings.youtube_gl)),
-                        Message::YoutubeRegionSelected,
+                        &ThemeMode::ALL[..],
+                        Some(self.settings.theme_mode),
+                        Message::ThemeModeSelected,
                     )
                     .padding([7, 14])
                     .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Language",
-                        "Preferred display language for YouTube Music metadata"
-                    ),
-                    horizontal_space(),
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
+                row_divider(),
+                self.settings_row(
+                    "Recognition audio input",
+                    "System loopback or microphone capture for acoustic Shazam identification",
                     pick_list(
-                        &YoutubeLanguageOption::ALL[..],
-                        Some(YoutubeLanguageOption::from_code(&self.settings.youtube_hl)),
-                        Message::YoutubeLanguageSelected,
+                        &RecognitionSource::ALL[..],
+                        Some(self.settings.recognition_source),
+                        Message::RecognitionSourceSelected,
                     )
                     .padding([7, 14])
                     .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                text(
-                    self.account_sync_status
-                        .as_deref()
-                        .unwrap_or(if self.yt.has_cookie() {
-                            "Signed in via saved YouTube cookie."
-                        } else {
-                            "Not signed in (anonymous mode)."
-                        })
-                )
-                .size(12)
-                .color(if self.yt.has_cookie() {
-                    color_from_rgb(p.primary)
-                } else {
-                    muted
-                }),
+                    .menu_style(pick_list_menu_style(p))
+                    .into(),
+                ),
             ]
             .spacing(12),
         )
-        .padding(18)
+        .padding(20)
         .style(elevated_card_style(p));
+
+        // --- Card 10: Loudness Repair & Vault Backup ---
+        let repair_btn = if self.repair_running {
+            button(text("Stop Volume Repair").size(13))
+                .padding([8, 16])
+                .style(top_pill_button_style(p, false))
+                .on_press(Message::StopFixVolumes)
+        } else {
+            button(text(format!(
+                "Fix Song Volumes ({} missing)",
+                self.missing_loudness_count
+            )).size(13))
+            .padding([8, 16])
+            .style(top_pill_button_style(p, false))
+            .on_press(Message::StartFixVolumes)
+        };
 
         let backup_path_hint = default_backup_path()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "echo-backup.echobak".to_string());
 
-        let backup_card = container(
+        let maintenance_vault_card = container(
             column![
-                text("Backup & Restore").size(17).font(bold()),
-                text(format!("Choose a .echobak snapshot location (default: {backup_path_hint})"))
-                    .size(12)
-                    .color(muted),
+                card_header(icons::REFRESH, "Loudness Repair & Vault Backup", "Song volume normalization index repair and .echobak library snapshots"),
+                row_divider(),
                 row![
-                    button(text("Export Backup...").size(13).font(bold()))
-                        .padding([8, 16])
-                        .style(top_pill_button_style(p, true))
-                        .on_press(Message::ExportBackup),
-                    button(text("Import Backup...").size(13))
-                        .padding([8, 16])
-                        .style(top_pill_button_style(p, false))
-                        .on_press(Message::ImportBackup),
-                ]
-                .spacing(10),
-                if let Some(st) = &self.backup_status {
-                    text(st).size(12).color(color_from_rgb(p.primary))
-                } else {
-                    text("").size(1)
-                }
-            ]
-            .spacing(12),
-        )
-        .padding(18)
-        .style(elevated_card_style(p));
-
-        let dl_default_hint = self
-            .settings
-            .effective_downloads_dir()
-            .map(|d| d.display().to_string())
-            .unwrap_or_else(|_| "Echo Downloads".to_string());
-        let cache_mb_used = self.cache_stats.1 as f64 / (1024.0 * 1024.0);
-        let folder_btn = |label: &'static str, target: FolderTarget| -> Element<'_, Message> {
-            button(
-                row![
-                    icons::icon(icons::FOLDER, 14.0, muted),
-                    text(label).size(12),
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
-            )
-            .padding([8, 14])
-            .style(outlined_pill_button_style(p, false))
-            .on_press(Message::PickFolder(target))
-            .into()
-        };
-        let downloads_cache_card = container(
-            column![
-                text("Downloads & Streaming Cache").size(17).font(bold()),
-                row![
-                    column![
-                        text("Max stream cache (MB)").size(14).font(bold()),
-                        text(format!(
-                            "Currently storing {} files ({:.1} MB)",
-                            self.cache_stats.0, cache_mb_used
-                        ))
+                    self.settings_row(
+                        "Loudness normalization repair",
+                        "Compute replaygain & loudness index for songs missing volume tags",
+                        repair_btn.into(),
+                    ),
+                    horizontal_space(),
+                    text(self.repair_status.as_deref().unwrap_or(""))
                         .size(12)
                         .color(muted),
+                ]
+                .align_y(Alignment::Center),
+                row_divider(),
+                column![
+                    text("Database & Library Snapshot Vault:").size(13).font(bold()),
+                    text(format!("Export or import a full .echobak snapshot (default path: {backup_path_hint})"))
+                        .size(12)
+                        .color(muted),
+                    row![
+                        button(text("Export Backup...").size(13).font(bold()))
+                            .padding([8, 16])
+                            .style(top_pill_button_style(p, true))
+                            .on_press(Message::ExportBackup),
+                        button(text("Import Backup...").size(13))
+                            .padding([8, 16])
+                            .style(top_pill_button_style(p, false))
+                            .on_press(Message::ImportBackup),
+                        horizontal_space(),
+                        if let Some(st) = &self.backup_status {
+                            text(st).size(12).color(color_from_rgb(p.primary))
+                        } else {
+                            text("").size(1)
+                        },
                     ]
-                    .spacing(2),
-                    horizontal_space(),
-                    text_input("512", &self.cache_size_input)
-                        .style(pill_search_input_style(p))
-                        .padding([8, 12])
-                        .width(96)
-                        .on_input(Message::MaxCacheSizeChanged),
-                    button(text("Clear Cache").size(12))
-                        .padding([8, 14])
-                        .style(outlined_pill_button_style(p, false))
-                        .on_press(Message::ClearStreamCache),
+                    .spacing(10)
+                    .align_y(Alignment::Center),
                 ]
-                .spacing(10)
-                .align_y(Alignment::Center),
-                text(format!("Active download folder: {dl_default_hint}"))
-                    .size(12)
-                    .color(muted),
-                row![
-                    text_input("Custom download folder (blank = default)", &self.download_folder_input)
-                        .style(pill_search_input_style(p))
-                        .padding([9, 14])
-                        .on_input(Message::DownloadFolderChanged)
-                        .on_submit(Message::SaveDownloadSettings)
-                        .width(Length::Fill),
-                    folder_btn("Browse", FolderTarget::DownloadFolder),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                row![
-                    text_input(
-                        "Extra import folders containing [youtube_id] files (semicolon-separated)",
-                        &self.extra_import_input
-                    )
-                    .style(pill_search_input_style(p))
-                    .padding([9, 14])
-                    .on_input(Message::ExtraImportFoldersChanged)
-                    .on_submit(Message::SaveDownloadSettings)
-                    .width(Length::Fill),
-                    folder_btn("Add", FolderTarget::ExtraImportFolder),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                row![
-                    button(text("Save Folders").size(13).font(bold()))
-                        .padding([8, 16])
-                        .style(top_pill_button_style(p, true))
-                        .on_press(Message::SaveDownloadSettings),
-                    button(text("Rescan [id] Folders").size(13))
-                        .padding([8, 14])
-                        .style(top_pill_button_style(p, false))
-                        .on_press(Message::ScanDownloadFolders),
-                    button(text("Migrate Downloads").size(13))
-                        .padding([8, 14])
-                        .style(top_pill_button_style(p, false))
-                        .on_press(Message::MigrateDownloads),
-                ]
-                .spacing(10),
-                if let Some(st) = &self.download_status {
-                    text(st).size(12).color(color_from_rgb(p.primary))
-                } else {
-                    text("").size(1)
-                }
+                .spacing(8),
             ]
             .spacing(12),
         )
-        .padding(18)
+        .padding(20)
         .style(elevated_card_style(p));
 
-        let local_media_card = container(
-            column![
-                text("Local Media Library").size(17).font(bold()),
-                row![
-                    text_input(
-                        "Music folders to scan (semicolon-separated paths)",
-                        &self.local_folders_input
-                    )
-                    .style(pill_search_input_style(p))
-                    .padding([9, 14])
-                    .on_input(Message::LocalFoldersChanged)
-                    .on_submit(Message::ScanLocalMedia)
-                    .width(Length::Fill),
-                    folder_btn("Add", FolderTarget::LocalMediaFolder),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                row![
-                    text_input(
-                        "Excluded folders (semicolon-separated paths)",
-                        &self.excluded_folders_input
-                    )
-                    .style(pill_search_input_style(p))
-                    .padding([9, 14])
-                    .on_input(Message::ExcludedFoldersChanged)
-                    .width(Length::Fill),
-                    folder_btn("Add", FolderTarget::ExcludedMediaFolder),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Deduplication sensitivity",
-                        "How strictly local files are matched against library tracks"
-                    ),
-                    horizontal_space(),
-                    pick_list(
-                        &ScannerSensitivity::ALL[..],
-                        Some(self.settings.scanner_sensitivity),
-                        Message::ScannerSensitivitySelected,
-                    )
-                    .padding([7, 14])
-                    .style(pick_list_style(p))
-                    .menu_style(pick_list_menu_style(p)),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Strict filenames",
-                        "Ignore 'Artist - Title' filename guessing when tags are missing"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.strict_file_names)
-                        .style(toggler_style(p))
-                        .on_toggle(Message::ToggleStrictFileNames),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    setting_label(
-                        "Auto-rescan on startup",
-                        "Index local folders automatically when Echo launches"
-                    ),
-                    horizontal_space(),
-                    toggler(self.settings.auto_scan_local_on_startup)
-                        .style(toggler_style(p))
-                        .on_toggle(Message::ToggleAutoScanLocal),
-                ]
-                .align_y(Alignment::Center),
-                row![
-                    button(text(if self.local_scanning {
-                        "Scanning..."
-                    } else {
-                        "Scan Local Media Now"
-                    }).size(13).font(bold()))
-                    .padding([8, 16])
-                    .style(top_pill_button_style(p, true))
-                    .on_press(Message::ScanLocalMedia),
-                    text(self.local_scan_status.as_deref().unwrap_or(""))
-                        .size(12)
-                        .color(muted),
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center),
-            ]
-            .spacing(12),
-        )
-        .padding(18)
-        .style(elevated_card_style(p));
+        // Group cards according to the selected navigation section
+        let mut cards: Vec<Element<'_, Message>> = Vec::new();
+        match self.settings_section {
+            SettingsSection::All => {
+                cards.push(audio_output_card.into());
+                cards.push(autoeq_dsp_card.into());
+                cards.push(custom_eq_card.into());
+                cards.push(smart_features_card.into());
+                cards.push(downloads_cache_card.into());
+                cards.push(local_media_card.into());
+                cards.push(account_card.into());
+                cards.push(lastfm_card.into());
+                cards.push(appearance_card.into());
+                cards.push(maintenance_vault_card.into());
+            }
+            SettingsSection::AudioDsp => {
+                cards.push(audio_output_card.into());
+                cards.push(autoeq_dsp_card.into());
+                cards.push(custom_eq_card.into());
+                cards.push(smart_features_card.into());
+            }
+            SettingsSection::LibraryMedia => {
+                cards.push(downloads_cache_card.into());
+                cards.push(local_media_card.into());
+            }
+            SettingsSection::Accounts => {
+                cards.push(account_card.into());
+                cards.push(lastfm_card.into());
+            }
+            SettingsSection::AppearanceSystem => {
+                cards.push(appearance_card.into());
+                cards.push(maintenance_vault_card.into());
+            }
+        }
 
         self.vscroll(
             column![
                 header,
                 container(
-                    column![
-                        audio_card,
-                        eq_card,
-                        exclusions_card,
-                        downloads_cache_card,
-                        local_media_card,
-                        account_card,
-                        theme_card,
-                        lastfm_card,
-                        backup_card,
-                    ]
-                    .spacing(14),
+                    column(cards).spacing(14)
                 )
-                .padding([8, 24]),
-                vertical_space().height(24),
+                .padding([12, 24]),
+                vertical_space().height(32),
             ]
-            .spacing(10),
+            .spacing(12),
         )
     }
 
