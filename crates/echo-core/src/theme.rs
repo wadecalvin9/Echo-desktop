@@ -32,11 +32,46 @@ impl RgbColor {
     }
 }
 
-/// Echo's fixed brand accent.
-pub const ACCENT: RgbColor = RgbColor::from_u8(30, 215, 96);
+/// Echo's fixed default accent (neutral silver-gray).
+pub const ACCENT: RgbColor = RgbColor::from_u8(184, 189, 198);
+
+/// Derives a vivid, high-contrast accent color from an album cover seed for `ThemeMode::Dynamic`.
+/// Falls back toward [`ACCENT`] when the cover is nearly grayscale.
+fn derive_dynamic_accent(seed: RgbColor) -> RgbColor {
+    let max_c = seed.r.max(seed.g).max(seed.b);
+    let min_c = seed.r.min(seed.g).min(seed.b);
+    let sat = if max_c > 0.0 {
+        (max_c - min_c) / max_c
+    } else {
+        0.0
+    };
+    if sat < 0.18 || max_c < 0.05 {
+        return ACCENT;
+    }
+
+    // Normalize hue by scaling peak channel to 1.0, then pull shadows up slightly so
+    // the accent stays vibrant yet legible with black foreground glyphs.
+    let inv = 1.0 / max_c;
+    let mut r = (seed.r * inv).clamp(0.0, 1.0);
+    let mut g = (seed.g * inv).clamp(0.0, 1.0);
+    let mut b = (seed.b * inv).clamp(0.0, 1.0);
+
+    // Ensure perceptual luma is bright enough (>= 0.56) for black icons/text on accent pills.
+    let mut candidate = RgbColor { r, g, b };
+    let luma = candidate.luma();
+    if luma < 0.56 {
+        let boost = ((0.56 - luma) / (1.0 - luma).max(0.05)).clamp(0.0, 0.72);
+        r += (1.0 - r) * boost;
+        g += (1.0 - g) * boost;
+        b += (1.0 - b) * boost;
+        candidate = RgbColor { r, g, b };
+    }
+    candidate
+}
 
 /// The surfaces and accent are fixed so the app always reads as one coherent, restrained
-/// design. Only [`DynamicPalette::tint`] follows the album art, and only the page hero uses it.
+/// design. In [`ThemeMode::Dynamic`], [`DynamicPalette::tint`] and [`DynamicPalette::primary`]
+/// adapt to the active album art.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DynamicPalette {
     /// Window backdrop, visible as the gutters between panels.
@@ -55,7 +90,7 @@ pub struct DynamicPalette {
 
 impl DynamicPalette {
     pub fn default_for(mode: ThemeMode) -> Self {
-        Self::from_seed(RgbColor::from_u8(83, 83, 100), mode)
+        Self::from_seed(RgbColor::from_u8(84, 86, 92), mode)
     }
 
     pub fn from_seed(seed: RgbColor, mode: ThemeMode) -> Self {
@@ -71,24 +106,27 @@ impl DynamicPalette {
             };
         }
 
-        let (background, surface, surface_elevated) = match mode {
+        let (background, surface, surface_elevated, primary) = match mode {
             ThemeMode::OledBlack => (
                 RgbColor::from_u8(0, 0, 0),
                 RgbColor::from_u8(9, 9, 11),
                 RgbColor::from_u8(20, 20, 24),
+                ACCENT,
             ),
             ThemeMode::Dark => (
                 RgbColor::from_u8(7, 7, 9),
                 RgbColor::from_u8(18, 18, 21),
                 RgbColor::from_u8(30, 30, 35),
+                ACCENT,
             ),
             ThemeMode::Dynamic => {
-                let base_surface = RgbColor::from_u8(16, 16, 19);
-                let base_elevated = RgbColor::from_u8(28, 28, 33);
+                let base_surface = RgbColor::from_u8(15, 15, 18);
+                let base_elevated = RgbColor::from_u8(27, 27, 32);
                 (
                     RgbColor::from_u8(5, 5, 7),
-                    base_surface.lerp(tint, 0.08),
-                    base_elevated.lerp(tint, 0.14),
+                    base_surface.lerp(tint, 0.12),
+                    base_elevated.lerp(tint, 0.18),
+                    derive_dynamic_accent(seed),
                 )
             }
         };
@@ -97,7 +135,7 @@ impl DynamicPalette {
             background,
             surface,
             surface_elevated,
-            primary: ACCENT,
+            primary,
             text: RgbColor::from_u8(255, 255, 255),
             text_muted: RgbColor::from_u8(167, 167, 167),
             danger: RgbColor::from_u8(241, 94, 108),
@@ -153,4 +191,31 @@ fn extract_vibrant_seed(rgb_bytes: &[u8]) -> Option<RgbColor> {
             b: avg_b / count,
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_mode_adapts_primary_while_dark_keeps_accent() {
+        let warm_seed = RgbColor::from_u8(210, 60, 40);
+        let dark = DynamicPalette::from_seed(warm_seed, ThemeMode::Dark);
+        assert_eq!(dark.primary, ACCENT);
+
+        let oled = DynamicPalette::from_seed(warm_seed, ThemeMode::OledBlack);
+        assert_eq!(oled.primary, ACCENT);
+
+        let dyn_p = DynamicPalette::from_seed(warm_seed, ThemeMode::Dynamic);
+        assert_ne!(dyn_p.primary, ACCENT);
+        assert!(dyn_p.primary.luma() >= 0.55);
+        assert!(dyn_p.tint.luma() <= 0.301);
+    }
+
+    #[test]
+    fn grayscale_seed_falls_back_to_brand_accent() {
+        let gray = RgbColor::from_u8(120, 120, 120);
+        let dyn_p = DynamicPalette::from_seed(gray, ThemeMode::Dynamic);
+        assert_eq!(dyn_p.primary, ACCENT);
+    }
 }

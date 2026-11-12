@@ -219,14 +219,14 @@ impl Default for AppSettings {
             .into_iter()
             .collect();
         Self {
-            audio_normalization: true,
+            audio_normalization: false,
             audio_quality: AudioQuality::Auto,
-            auto_load_more: true,
+            auto_load_more: false,
             skip_silence: false,
             transition_fade_ms: 0,
             eq_preset: EqPreset::Flat,
             spatial_mode: SpatialMode::Off,
-            better_lyrics_enabled: true,
+            better_lyrics_enabled: false,
             romanize_lyrics: false,
             max_cache_size_mb: 512,
             download_folder: None,
@@ -247,7 +247,7 @@ impl Default for AppSettings {
             lastfm_api_secret: std::env::var("ECHO_LASTFM_API_SECRET").unwrap_or_default(),
             lastfm_session_key: None,
             lastfm_username: None,
-            lastfm_scrobbling_enabled: true,
+            lastfm_scrobbling_enabled: false,
         }
     }
 }

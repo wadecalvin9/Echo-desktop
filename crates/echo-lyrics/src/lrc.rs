@@ -21,10 +21,25 @@ impl LyricsSource {
     }
 }
 
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LyricWord {
+    pub time_ms: u64,
+    pub end_ms: Option<u64>,
+    pub text: String,
+    #[serde(default = "default_true")]
+    pub ends_with_space: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LyricsLine {
     pub time_ms: u64,
     pub text: String,
+    #[serde(default)]
+    pub words: Vec<LyricWord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +99,7 @@ pub fn parse_lrc(raw: &str) -> Vec<LyricsLine> {
             lines.push(LyricsLine {
                 time_ms,
                 text: text.clone(),
+                words: Vec::new(),
             });
         }
     }

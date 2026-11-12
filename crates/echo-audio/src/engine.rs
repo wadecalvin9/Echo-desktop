@@ -78,6 +78,9 @@ struct SharedState {
     is_local: AtomicBool,
     finished_seq: AtomicU64,
     paused: AtomicBool,
+    out_rate: AtomicU64,
+    out_channels: AtomicU64,
+    spectrum_packed: AtomicU64,
     ring: Mutex<VecDeque<f32>>,
 }
 
@@ -99,6 +102,9 @@ impl SharedState {
             is_local: AtomicBool::new(false),
             finished_seq: AtomicU64::new(0),
             paused: AtomicBool::new(false),
+            out_rate: AtomicU64::new(48_000),
+            out_channels: AtomicU64::new(2),
+            spectrum_packed: AtomicU64::new(0),
             ring: Mutex::new(VecDeque::with_capacity(48_000 * 4)),
         }
     }
@@ -203,6 +209,17 @@ impl AudioEngine {
             loudness_db: *self.shared.loudness_db.lock().expect("loudness"),
             finished_seq: self.shared.finished_seq.load(Ordering::Relaxed),
         }
+    }
+
+    /// Returns 8 smoothed real-time frequency band levels in `0.0..=1.0` from the active output.
+    pub fn spectrum_bands(&self) -> [f32; 8] {
+        let packed = self.shared.spectrum_packed.load(Ordering::Relaxed);
+        let mut bands = [0.0f32; 8];
+        for (i, slot) in bands.iter_mut().enumerate() {
+            let byte = ((packed >> (i * 8)) & 0xFF) as u8;
+            *slot = byte as f32 / 255.0;
+        }
+        bands
     }
 }
 
@@ -362,6 +379,8 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
     };
 
     let mut active: Option<ActiveDecoder> = None;
+    shared.out_rate.store(out_rate as u64, Ordering::Relaxed);
+    shared.out_channels.store(out_channels as u64, Ordering::Relaxed);
     let max_ring_samples = (out_rate as usize) * out_channels / 2; // ~500 ms buffer
     let (init_eq, init_spatial) = *shared.dsp_config.lock().expect("dsp_config");
     let mut seen_dsp_gen = shared.dsp_generation.load(Ordering::Relaxed);
@@ -566,17 +585,102 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
 fn fill_output_f32(shared: &SharedState, out: &mut [f32]) {
     if shared.paused.load(Ordering::Relaxed) {
         out.fill(0.0);
+        decay_spectrum(shared);
         return;
     }
     let gain = shared.total_gain();
-    let mut ring = shared.ring.lock().expect("ring");
-    for sample in out.iter_mut() {
-        if let Some(s) = ring.pop_front() {
-            *sample = apply_gain_and_soft_limit(s, gain);
-        } else {
-            *sample = 0.0;
+    let mut non_zero = false;
+    {
+        let mut ring = shared.ring.lock().expect("ring");
+        for sample in out.iter_mut() {
+            if let Some(s) = ring.pop_front() {
+                let v = apply_gain_and_soft_limit(s, gain);
+                *sample = v;
+                if v.abs() > 1e-5 {
+                    non_zero = true;
+                }
+            } else {
+                *sample = 0.0;
+            }
         }
     }
+    if non_zero {
+        update_spectrum(shared, out);
+    } else {
+        decay_spectrum(shared);
+    }
+}
+
+fn decay_spectrum(shared: &SharedState) {
+    let prev = shared.spectrum_packed.load(Ordering::Relaxed);
+    if prev == 0 {
+        return;
+    }
+    let mut next_packed = 0u64;
+    for i in 0..8 {
+        let byte = ((prev >> (i * 8)) & 0xFF) as f32;
+        let decayed = (byte * 0.78).floor().clamp(0.0, 255.0) as u64;
+        next_packed |= decayed << (i * 8);
+    }
+    shared.spectrum_packed.store(next_packed, Ordering::Relaxed);
+}
+
+fn update_spectrum(shared: &SharedState, interleaved: &[f32]) {
+    const BAND_FREQS: [f32; 8] = [65.0, 140.0, 300.0, 650.0, 1400.0, 2800.0, 5600.0, 10500.0];
+    let channels = (shared.out_channels.load(Ordering::Relaxed) as usize).max(1);
+    let sample_rate = (shared.out_rate.load(Ordering::Relaxed) as f32).max(8_000.0);
+    let total_frames = interleaved.len() / channels;
+    if total_frames < 16 {
+        return;
+    }
+
+    let n = total_frames.min(256);
+    let mut mono = [0.0f32; 256];
+    let step = (total_frames / n).max(1);
+    let inv_ch = 1.0 / channels as f32;
+    let effective_sr = sample_rate / step as f32;
+
+    for (idx, dst) in mono[..n].iter_mut().enumerate() {
+        let frame_base = (idx * step) * channels;
+        let mut sum = 0.0f32;
+        for c in 0..channels {
+            sum += interleaved[frame_base + c];
+        }
+        // Hann-like window reduces spectral leakage cleanly without allocations.
+        let w = 0.5 * (1.0 - (2.0 * std::f32::consts::PI * idx as f32 / (n - 1) as f32).cos());
+        *dst = sum * inv_ch * w;
+    }
+
+    let prev_packed = shared.spectrum_packed.load(Ordering::Relaxed);
+    let mut next_packed = 0u64;
+    for (b, &freq) in BAND_FREQS.iter().enumerate() {
+        let prev = ((prev_packed >> (b * 8)) & 0xFF) as f32 / 255.0;
+        let mag = if freq < effective_sr * 0.45 {
+            let omega = 2.0 * std::f32::consts::PI * freq / effective_sr;
+            let coeff = 2.0 * omega.cos();
+            let mut s1 = 0.0f32;
+            let mut s2 = 0.0f32;
+            for &x in &mono[..n] {
+                let s0 = x + coeff * s1 - s2;
+                s2 = s1;
+                s1 = s0;
+            }
+            let power = (s1 * s1 + s2 * s2 - coeff * s1 * s2).max(0.0);
+            let norm = (power.sqrt() / (n as f32 * 0.22)).clamp(0.0, 1.0);
+            // Gentle logarithmic compression so quiet highs and loud bass both look expressive.
+            (norm * 2.2).ln_1p() / 2.2f32.ln_1p()
+        } else {
+            0.0
+        };
+        let smoothed = if mag > prev {
+            prev * 0.40 + mag * 0.60
+        } else {
+            prev * 0.72 + mag * 0.28
+        };
+        let byte = (smoothed.clamp(0.0, 1.0) * 255.0).round() as u64;
+        next_packed |= byte << (b * 8);
+    }
+    shared.spectrum_packed.store(next_packed, Ordering::Relaxed);
 }
 
 fn resample_and_remix(

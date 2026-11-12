@@ -6,7 +6,7 @@ pub mod romanize;
 
 pub use betterlyrics::{parse_ttml, BetterLyricsClient};
 pub use kugou::{generate_keyword, normalize_kugou_lrc, KuGouClient, KuGouError};
-pub use lrc::{parse_lrc, LyricsLine, LyricsResult, LyricsSource};
+pub use lrc::{parse_lrc, LyricWord, LyricsLine, LyricsResult, LyricsSource};
 pub use lrclib::{LrcLibClient, LrcLibError, LrcLibTrack};
 pub use romanize::{contains_cjk_or_hangul_or_kana, romanize_text};
 
@@ -78,23 +78,22 @@ impl LyricsFetcher {
             }
         }
 
-        if use_better_lyrics {
-            if let Some(bl) = self
-                .better
+        let lrclib_res = if use_better_lyrics {
+            let (bl_opt, lrc_res) = tokio::join!(
+                self.better.fetch_lyrics(title, artist, duration_secs, album),
+                self.lrclib.fetch_lyrics(title, artist, duration_secs, album),
+            );
+            if let Some(bl) = bl_opt.filter(|r| !r.synced.is_empty()) {
+                return Some(bl);
+            }
+            lrc_res
+        } else {
+            self.lrclib
                 .fetch_lyrics(title, artist, duration_secs, album)
                 .await
-            {
-                if !bl.synced.is_empty() {
-                    return Some(bl);
-                }
-            }
-        }
+        };
 
-        if let Ok(res) = self
-            .lrclib
-            .fetch_lyrics(title, artist, duration_secs, album)
-            .await
-        {
+        if let Ok(res) = lrclib_res {
             if !res.synced.is_empty() {
                 return Some(res);
             }
@@ -158,6 +157,47 @@ mod tests {
         assert_eq!(romanize_text("한글"), "hangeul");
         assert_eq!(romanize_text("こんにちは"), "konnichiha");
         assert_eq!(romanize_text("トーキョー"), "tookyoo");
+    }
+
+    #[test]
+    fn parses_word_level_ttml_spans() {
+        let ttml = r#"
+            <tt><body><div>
+                <p begin="00:10.00" end="00:13.00">
+                    <span begin="00:10.00" end="00:11.00">Feel</span>
+                    <span begin="00:11.20" end="00:12.10">the</span>
+                    <span begin="00:12.20" end="00:13.00">beat</span>
+                </p>
+            </div></body></tt>
+        "#;
+        let parsed = parse_ttml(ttml);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].words.len(), 3);
+        assert_eq!(parsed[0].words[0].text, "Feel");
+        assert_eq!(parsed[0].words[1].time_ms, 11_200);
+        assert_eq!(parsed[0].words[2].end_ms, Some(13_000));
+    }
+
+    #[test]
+    fn parses_nested_spans_syllables_and_dur_times() {
+        let ttml = r#"
+            <tt><body><div>
+                <p>
+                    <span begin="1000ms" dur="500ms">Ev</span><span begin="1500ms" end="2000ms">ery</span><span begin="2.0s" end="2.4s">day</span>
+                    <span ttm:role="x-bg">(<span begin="2500ms" end="3200ms">yeah</span>)</span>
+                </p>
+            </div></body></tt>
+        "#;
+        let parsed = parse_ttml(ttml);
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].time_ms, 1_000);
+        assert_eq!(parsed[0].words[0].text, "Ev");
+        assert!(!parsed[0].words[0].ends_with_space);
+        assert_eq!(parsed[0].words[1].text, "ery");
+        assert!(!parsed[0].words[1].ends_with_space);
+        assert_eq!(parsed[0].words[2].text, "day");
+        assert!(parsed[0].words[2].ends_with_space);
+        assert!(parsed[0].words.iter().any(|w| w.text == "yeah" && w.time_ms == 2500));
     }
 }
 

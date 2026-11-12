@@ -5,11 +5,17 @@ pub mod db;
 pub mod downloads;
 pub mod local_media;
 pub mod models;
+pub mod recommendations;
 pub mod settings;
 pub mod theme;
 
 pub use adaptive_queue::{
-    extract_title_tags, prune_queue_tail, score_candidate, ListenerContext, SongTag,
+    extract_title_tags, prune_queue_tail, score_artist_name, score_candidate, ListenerContext,
+    SongTag,
+};
+pub use recommendations::{
+    base_version_key, build_recommendations, is_preview_title, EngineCard, EngineLane,
+    EngineOutput, ListenRecord, RelatedEdge,
 };
 pub use backup::{default_backup_path, export_backup, validate_and_unpack_backup, BackupError};
 pub use cache::{
@@ -25,8 +31,9 @@ pub use local_media::{
     LocalMediaScanConfig,
 };
 pub use models::{
-    AlbumRef, ArtistRef, AudioQuality, PendingScrobble, Playlist, QueueItem, QueueState,
-    RecognitionEntry, RepeatMode, Track, TrackStats,
+    AlbumRef, AlbumStats, ArtistRef, ArtistStats, AudioQuality, DailyListening, ListeningSummary,
+    PendingScrobble, Playlist, QueueItem, QueueState, RecognitionEntry, RepeatMode, Track,
+    TrackStats,
 };
 pub use settings::{
     AppSettings, EqPreset, RecognitionSource, ScannerSensitivity, SettingsError, SpatialMode,
@@ -94,6 +101,26 @@ mod tests {
         let recs = db.recognition_history(10).unwrap();
         assert_eq!(recs.len(), 1);
         assert_eq!(recs[0].video_id.as_deref(), Some("v1"));
+
+        let summary = db.listening_summary(None, 20).unwrap();
+        assert_eq!(summary.total_plays, 2);
+        assert_eq!(summary.total_played_secs, 380);
+        assert_eq!(summary.unique_tracks, 1);
+        assert_eq!(summary.unique_artists, 1);
+        assert_eq!(summary.current_streak_days, 1);
+        assert_eq!(summary.top_artists[0].name, "Rick Astley");
+        assert_eq!(summary.top_albums[0].title, "Whenever You Need Somebody");
+        assert_eq!(summary.daily_activity.len(), 14);
+
+        let mut taste_ctx = ListenerContext::default();
+        taste_ctx.seed_from_taste(
+            std::slice::from_ref(&t),
+            &summary.top_artists,
+            std::slice::from_ref(&t),
+        );
+        assert!(taste_ctx.known);
+        assert!(score_candidate(&t, &taste_ctx) > 0.0);
+        assert!(!taste_ctx.is_disliked_artist("Rick Astley"));
     }
 
     #[test]

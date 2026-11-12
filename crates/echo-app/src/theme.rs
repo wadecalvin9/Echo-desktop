@@ -49,8 +49,7 @@ pub fn glass_panel_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Sty
         text_color: Some(color_from_rgb(p.text)),
         border: Border {
             radius: 12.0.into(),
-            width: 1.0,
-            color: white(0.05),
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -62,8 +61,7 @@ pub fn elevated_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::S
         text_color: Some(color_from_rgb(p.text)),
         border: Border {
             radius: 10.0.into(),
-            width: 1.0,
-            color: white(0.06),
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -81,8 +79,7 @@ pub fn bento_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Styl
             text_color: Some(color_from_rgb(p.text)),
             border: Border {
                 radius: 12.0.into(),
-                width: 1.0,
-                color: white(0.08),
+                ..Default::default()
             },
             ..Default::default()
         }
@@ -103,11 +100,227 @@ pub fn expanded_stage_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::
             text_color: Some(color_from_rgb(p.text)),
             border: Border {
                 radius: 12.0.into(),
-                width: 1.0,
-                color: white(0.07),
+                ..Default::default()
             },
             ..Default::default()
         }
+    }
+}
+
+/// Flush dark-tinted scrim for the compact Mini-Player window (square outer edge).
+pub fn mini_player_scrim_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let top = with_alpha(color_from_rgb(p.tint.lerp(p.background, 0.55)), 0.76);
+        let bottom = with_alpha(color_from_rgb(p.surface.lerp(p.background, 0.55)), 0.92);
+        let grad = Linear::new(Radians(std::f32::consts::PI))
+            .add_stop(0.0, top)
+            .add_stop(1.0, bottom);
+        container::Style {
+            background: Some(Background::Gradient(Gradient::Linear(grad))),
+            text_color: Some(color_from_rgb(p.text)),
+            ..Default::default()
+        }
+    }
+}
+
+pub fn mini_player_fallback_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let top = color_from_rgb(p.tint.lerp(p.surface, 0.25));
+        let bottom = color_from_rgb(p.background.lerp(p.surface, 0.50));
+        let grad = Linear::new(Radians(std::f32::consts::FRAC_PI_4 * 3.0))
+            .add_stop(0.0, top)
+            .add_stop(1.0, bottom);
+        container::Style {
+            background: Some(Background::Gradient(Gradient::Linear(grad))),
+            text_color: Some(color_from_rgb(p.text)),
+            ..Default::default()
+        }
+    }
+}
+
+/// Translucent dark-tinted scrim placed over blurred cover art so typography remains sharp.
+pub fn ambient_scrim_style(
+    p: DynamicPalette,
+    top_alpha: f32,
+    bottom_alpha: f32,
+) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let top = with_alpha(color_from_rgb(p.tint.lerp(p.background, 0.55)), top_alpha);
+        let bottom = with_alpha(color_from_rgb(p.surface.lerp(p.background, 0.45)), bottom_alpha);
+        let grad = Linear::new(Radians(std::f32::consts::PI))
+            .add_stop(0.0, top)
+            .add_stop(1.0, bottom);
+        container::Style {
+            background: Some(Background::Gradient(Gradient::Linear(grad))),
+            text_color: Some(color_from_rgb(p.text)),
+            border: Border {
+                radius: 12.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+pub fn stat_bar_track_style() -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(white(0.06))),
+        border: Border {
+            radius: 999.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+pub fn stat_bar_fill_style(color: Color, radius: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(color)),
+        border: Border {
+            radius: radius.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+pub fn stats_rank_badge_style(
+    p: DynamicPalette,
+    is_podium: bool,
+) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(if is_podium {
+            with_alpha(color_from_rgb(p.primary), 0.16)
+        } else {
+            white(0.06)
+        })),
+        text_color: Some(if is_podium {
+            color_from_rgb(p.primary)
+        } else {
+            color_from_rgb(p.text_muted)
+        }),
+        border: Border {
+            radius: 999.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+/// Rounded frosted bento card button for Listening Stats spotlight & horizontal artist cards.
+pub fn stats_bento_button_style(
+    p: DynamicPalette,
+    highlight: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let accent = color_from_rgb(p.primary);
+        let base_surface = color_from_rgb(p.surface_elevated);
+        let bg = if highlight {
+            with_alpha(
+                color_from_rgb(p.primary.lerp(p.surface_elevated, 0.84)),
+                if hovered { 0.96 } else { 0.88 },
+            )
+        } else if hovered {
+            with_alpha(base_surface, 0.96)
+        } else {
+            with_alpha(base_surface, 0.72)
+        };
+        let border_color = if highlight {
+            with_alpha(accent, if hovered { 0.72 } else { 0.36 })
+        } else if hovered {
+            white(0.18)
+        } else {
+            white(0.08)
+        };
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: color_from_rgb(p.text),
+            border: Border {
+                radius: 18.0.into(),
+                width: 1.0,
+                color: border_color,
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, if hovered { 0.30 } else { 0.16 }),
+                offset: Vector::new(0.0, if hovered { 6.0 } else { 3.0 }),
+                blur_radius: if hovered { 16.0 } else { 10.0 },
+            },
+        }
+    }
+}
+
+/// Elevated artwork shadow & subtle rim highlight (Apple Music / Tidal cover frame).
+pub fn artwork_frame_style(radius: f32, shadow_alpha: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        border: Border {
+            radius: radius.into(),
+            width: 1.0,
+            color: white(0.04),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, shadow_alpha),
+            offset: Vector::new(0.0, 12.0),
+            blur_radius: 28.0,
+        },
+        ..Default::default()
+    }
+}
+
+/// Subtle dark gradient scrim over card artwork on hover so the floating play FAB pops.
+pub fn card_hover_scrim_style(radius: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let grad = Linear::new(Radians(std::f32::consts::PI))
+            .add_stop(0.0, Color::from_rgba(0.0, 0.0, 0.0, 0.05))
+            .add_stop(1.0, Color::from_rgba(0.0, 0.0, 0.0, 0.52));
+        container::Style {
+            background: Some(Background::Gradient(Gradient::Linear(grad))),
+            border: Border {
+                radius: radius.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+pub fn tooltip_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(Color::from_rgb(0.12, 0.12, 0.14))),
+        text_color: Some(color_from_rgb(p.text)),
+        border: Border {
+            radius: 8.0.into(),
+            width: 1.0,
+            color: white(0.12),
+        },
+        shadow: Shadow {
+            color: Color::from_rgba(0.0, 0.0, 0.0, 0.55),
+            offset: Vector::new(0.0, 6.0),
+            blur_radius: 16.0,
+        },
+    }
+}
+
+pub fn skeleton_block_style(alpha: f32, radius: f32) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(white(alpha))),
+        border: Border {
+            radius: radius.into(),
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+pub fn badge_pill_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(white(0.07))),
+        text_color: Some(color_from_rgb(p.text)),
+        border: Border {
+            radius: 999.0.into(),
+            ..Default::default()
+        },
+        ..Default::default()
     }
 }
 
@@ -147,8 +360,8 @@ pub fn liked_gradient_badge_style() -> impl Fn(&Theme) -> container::Style {
 
 pub fn downloads_badge_style() -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
-        background: Some(Background::Color(Color::from_rgb(0.02, 0.36, 0.24))),
-        text_color: Some(Color::from_rgb(0.118, 0.843, 0.376)),
+        background: Some(Background::Color(Color::from_rgb(0.16, 0.17, 0.19))),
+        text_color: Some(Color::from_rgb(0.80, 0.82, 0.85)),
         border: Border {
             radius: 6.0.into(),
             ..Default::default()
@@ -172,17 +385,29 @@ pub fn local_badge_style() -> impl Fn(&Theme) -> container::Style {
 pub fn account_badge_style(
     p: DynamicPalette,
     signed_in: bool,
+    active: bool,
 ) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
         background: Some(Background::Color(if signed_in {
             color_from_rgb(p.primary)
+        } else if active {
+            white(0.18)
         } else {
-            Color::from_rgb(0.16, 0.16, 0.18)
+            white(0.10)
         })),
         text_color: Some(if signed_in { Color::BLACK } else { Color::WHITE }),
         border: Border {
+            color: if active {
+                if signed_in {
+                    white(0.65)
+                } else {
+                    color_from_rgb(p.primary)
+                }
+            } else {
+                Color::TRANSPARENT
+            },
+            width: if active { 1.5 } else { 0.0 },
             radius: 999.0.into(),
-            ..Default::default()
         },
         ..Default::default()
     }
@@ -222,13 +447,17 @@ pub fn outlined_pill_button_style(
     }
 }
 
-/// Page header: the cover's colour fading into the panel, the way Spotify headers do.
+/// Page header: smooth atmospheric color glow fading seamlessly into the panel surface.
 pub fn hero_banner_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
         let top = color_from_rgb(p.tint);
+        let mid_hi = color_from_rgb(p.tint.lerp(p.surface, 0.36));
+        let mid_lo = color_from_rgb(p.tint.lerp(p.surface, 0.78));
         let bottom = color_from_rgb(p.surface);
         let grad = Linear::new(Radians(std::f32::consts::PI))
             .add_stop(0.0, top)
+            .add_stop(0.32, mid_hi)
+            .add_stop(0.72, mid_lo)
             .add_stop(1.0, bottom);
         container::Style {
             background: Some(Background::Gradient(Gradient::Linear(grad))),
@@ -247,12 +476,67 @@ pub fn hero_banner_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Sty
     }
 }
 
-/// The player sits directly on the backdrop with a subtle top highlight.
+/// The player dock blends seamlessly into the app backdrop with subtle depth.
 pub fn player_dock_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Color(color_from_rgb(p.background))),
-        text_color: Some(color_from_rgb(p.text)),
-        ..Default::default()
+    move |_| {
+        let base = color_from_rgb(p.surface.lerp(p.background, 0.52));
+        container::Style {
+            background: Some(Background::Color(base)),
+            text_color: Some(color_from_rgb(p.text)),
+            border: Border {
+                radius: 14.0.into(),
+                width: 1.0,
+                color: white(0.045),
+            },
+            ..Default::default()
+        }
+    }
+}
+
+pub fn soft_pill_button_style(
+    p: DynamicPalette,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(Background::Color(white(if hovered { 0.14 } else { 0.07 }))),
+            text_color: if hovered {
+                Color::WHITE
+            } else {
+                with_alpha(color_from_rgb(p.text_muted), 0.92)
+            },
+            border: Border {
+                radius: 999.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+pub fn pager_button_style(
+    p: DynamicPalette,
+    enabled: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = enabled && matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: Some(Background::Color(if hovered {
+                white(0.15)
+            } else {
+                white(if enabled { 0.07 } else { 0.025 })
+            })),
+            text_color: if enabled {
+                color_from_rgb(p.text)
+            } else {
+                with_alpha(color_from_rgb(p.text_muted), 0.30)
+            },
+            border: Border {
+                radius: 999.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 }
 
@@ -283,29 +567,32 @@ pub fn divider_style(alpha: f32) -> impl Fn(&Theme) -> container::Style {
 // Buttons
 // ---------------------------------------------------------------------------------------------
 
-/// Chips: a selected chip is solid white with black text, the rest are quiet grey.
+/// Chips: selected chip is high-contrast crisp white, inactive chips have frosted glass borders.
 pub fn top_pill_button_style(
     _p: DynamicPalette,
     active: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
-        let (bg, fg) = if active {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let (bg, fg, border_color) = if active {
             (
-                if matches!(status, button::Status::Hovered) {
+                if hovered {
                     Color::from_rgb(0.92, 0.92, 0.92)
                 } else {
                     Color::WHITE
                 },
                 Color::BLACK,
+                white(0.0),
             )
         } else {
             (
-                white(if matches!(status, button::Status::Hovered) {
-                    0.17
+                white(if hovered { 0.16 } else { 0.08 }),
+                if hovered {
+                    Color::WHITE
                 } else {
-                    0.10
-                }),
-                Color::WHITE,
+                    white(0.90)
+                },
+                white(if hovered { 0.22 } else { 0.10 }),
             )
         };
         button::Style {
@@ -313,7 +600,8 @@ pub fn top_pill_button_style(
             text_color: fg,
             border: Border {
                 radius: 999.0.into(),
-                ..Default::default()
+                width: if active { 0.0 } else { 1.0 },
+                color: border_color,
             },
             ..Default::default()
         }
@@ -385,6 +673,115 @@ pub fn tile_button_style(p: DynamicPalette) -> impl Fn(&Theme, button::Status) -
     }
 }
 
+/// Frosted glass quick-pick tiles in the Home greeting bento grid.
+pub fn quick_tile_button_style(
+    p: DynamicPalette,
+    is_playing: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let accent = color_from_rgb(p.primary);
+        let bg = if is_playing {
+            with_alpha(
+                color_from_rgb(p.primary.lerp(p.surface_elevated, 0.80)),
+                if hovered { 0.95 } else { 0.88 },
+            )
+        } else if hovered {
+            white(0.145)
+        } else {
+            white(0.075)
+        };
+        let border_color = if is_playing {
+            with_alpha(accent, if hovered { 0.85 } else { 0.58 })
+        } else if hovered {
+            white(0.22)
+        } else {
+            white(0.09)
+        };
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: color_from_rgb(p.text),
+            border: Border {
+                radius: 12.0.into(),
+                width: 1.0,
+                color: border_color,
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, if hovered { 0.28 } else { 0.14 }),
+                offset: Vector::new(0.0, if hovered { 6.0 } else { 3.0 }),
+                blur_radius: if hovered { 14.0 } else { 8.0 },
+            },
+        }
+    }
+}
+
+/// Up Next preview card in Cinema Stage left showcase column.
+pub fn up_next_card_button_style(
+    p: DynamicPalette,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let accent = color_from_rgb(p.primary);
+        button::Style {
+            background: Some(Background::Color(if hovered {
+                white(0.12)
+            } else {
+                white(0.065)
+            })),
+            text_color: Color::WHITE,
+            border: Border {
+                radius: 12.0.into(),
+                width: 1.0,
+                color: if hovered {
+                    with_alpha(accent, 0.45)
+                } else {
+                    white(0.09)
+                },
+            },
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, if hovered { 0.32 } else { 0.16 }),
+                offset: Vector::new(0.0, if hovered { 4.0 } else { 2.0 }),
+                blur_radius: if hovered { 12.0 } else { 6.0 },
+            },
+        }
+    }
+}
+
+/// Circular action indicator on the trailing edge of a Home quick-pick tile.
+pub fn quick_tile_play_badge_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        if active {
+            container::Style {
+                background: Some(Background::Color(color_from_rgb(p.primary))),
+                text_color: Some(Color::BLACK),
+                border: Border {
+                    radius: 999.0.into(),
+                    ..Default::default()
+                },
+                shadow: Shadow {
+                    color: with_alpha(color_from_rgb(p.primary), 0.35),
+                    offset: Vector::new(0.0, 2.0),
+                    blur_radius: 10.0,
+                },
+            }
+        } else {
+            container::Style {
+                background: Some(Background::Color(white(0.065))),
+                text_color: Some(white(0.65)),
+                border: Border {
+                    radius: 999.0.into(),
+                    width: 1.0,
+                    color: white(0.08),
+                },
+                ..Default::default()
+            }
+        }
+    }
+}
+
 pub fn icon_button_style(
     p: DynamicPalette,
     active: bool,
@@ -440,7 +837,7 @@ pub fn window_control_button_style(
     }
 }
 
-/// The big accent play button on page headers. Black glyph on green with ambient elevation.
+/// The big accent play button on page headers. Black glyph on accent pill with ambient elevation.
 pub fn glowing_play_button_style(
     p: DynamicPalette,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
@@ -449,9 +846,9 @@ pub fn glowing_play_button_style(
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
         let bg = if hovered {
             Color::from_rgb(
-                (accent.r + 0.12).min(1.0),
-                (accent.g + 0.06).min(1.0),
-                (accent.b + 0.12).min(1.0),
+                (accent.r + 0.09).min(1.0),
+                (accent.g + 0.09).min(1.0),
+                (accent.b + 0.09).min(1.0),
             )
         } else {
             accent
@@ -522,31 +919,30 @@ pub fn pill_search_input_style(
     }
 }
 
-/// Thin rail, white fill that turns green with a visible handle on hover, as Spotify's does.
-pub fn slim_slider_style(fill: Color) -> impl Fn(&Theme, slider::Status) -> slider::Style {
+/// Thin rail, white fill that turns accent with a visible handle on hover, as Spotify's does.
+pub fn slim_slider_style(
+    fill: Color,
+    hover_accent: Color,
+) -> impl Fn(&Theme, slider::Status) -> slider::Style {
     move |_, status| {
         let hot = matches!(status, slider::Status::Hovered | slider::Status::Dragged);
         let is_white = fill.r > 0.99 && fill.g > 0.99 && fill.b > 0.99;
-        let fill_color = if hot && is_white {
-            color_from_rgb(ACCENT)
-        } else {
-            fill
-        };
+        let fill_color = if hot && is_white { hover_accent } else { fill };
         slider::Style {
             rail: slider::Rail {
                 backgrounds: (
                     Background::Color(fill_color),
-                    Background::Color(white(0.30)),
+                    Background::Color(white(if hot { 0.36 } else { 0.24 })),
                 ),
-                width: 4.0,
+                width: if hot { 5.0 } else { 4.0 },
                 border: Border {
-                    radius: 2.0.into(),
+                    radius: 2.5.into(),
                     ..Default::default()
                 },
             },
             handle: slider::Handle {
                 shape: slider::HandleShape::Circle {
-                    radius: if hot { 6.0 } else { 0.5 },
+                    radius: if hot { 6.5 } else { 0.5 },
                 },
                 background: Background::Color(Color::WHITE),
                 border_width: 0.0,
@@ -556,22 +952,50 @@ pub fn slim_slider_style(fill: Color) -> impl Fn(&Theme, slider::Status) -> slid
     }
 }
 
-/// A scrollbar that stays out of the way until the pointer is over it.
+/// An overlay-style scrollbar that stays invisible until hovered or dragged.
 pub fn scroll_style(_p: DynamicPalette) -> impl Fn(&Theme, scrollable::Status) -> scrollable::Style {
     move |theme, status| {
         let mut s = scrollable::default(theme, status);
-        let hot = !matches!(status, scrollable::Status::Active);
-        let thumb = white(if hot { 0.45 } else { 0.22 });
-        for rail in [&mut s.vertical_rail, &mut s.horizontal_rail] {
+        s.container = container::Style::default();
+        s.gap = None;
+
+        let (v_alpha, h_alpha) = match status {
+            scrollable::Status::Active { .. } => (0.0, 0.0),
+            scrollable::Status::Hovered {
+                is_vertical_scrollbar_hovered,
+                is_horizontal_scrollbar_hovered,
+                ..
+            } => (
+                if is_vertical_scrollbar_hovered { 0.38 } else { 0.14 },
+                if is_horizontal_scrollbar_hovered { 0.38 } else { 0.14 },
+            ),
+            scrollable::Status::Dragged {
+                is_vertical_scrollbar_dragged,
+                is_horizontal_scrollbar_dragged,
+                ..
+            } => (
+                if is_vertical_scrollbar_dragged { 0.56 } else { 0.22 },
+                if is_horizontal_scrollbar_dragged { 0.56 } else { 0.22 },
+            ),
+        };
+
+        for (rail, alpha) in [
+            (&mut s.vertical_rail, v_alpha),
+            (&mut s.horizontal_rail, h_alpha),
+        ] {
             rail.background = None;
             rail.border = Border::default();
-            rail.scroller.color = thumb;
+            rail.scroller.color = if alpha > 0.0 {
+                white(alpha)
+            } else {
+                Color::TRANSPARENT
+            };
             rail.scroller.border = Border {
                 radius: 999.0.into(),
-                ..Default::default()
+                width: 0.0,
+                color: Color::TRANSPARENT,
             };
         }
-        s.gap = None;
         s
     }
 }
@@ -623,6 +1047,15 @@ pub fn rounded_image_handle(raw: &[u8], size: u32, radius: f32, circle: bool) ->
     Some(image::Handle::from_rgba(size, size, rgba.into_raw()))
 }
 
+/// Produces a soft atmospheric blurred cover texture for the Expanded Lyrics Stage and Hero headers.
+pub fn blurred_image_handle(raw: &[u8]) -> Option<image::Handle> {
+    let img = ::image::load_from_memory(raw).ok()?;
+    let small = img.resize_to_fill(84, 84, FilterType::Triangle).to_rgba8();
+    let blurred = ::image::imageops::blur(&small, 11.0);
+    let (w, h) = blurred.dimensions();
+    Some(image::Handle::from_rgba(w, h, blurred.into_raw()))
+}
+
 /// The pill behind the top search box. The input inside it is drawn bare.
 pub fn search_field_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
@@ -630,8 +1063,7 @@ pub fn search_field_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::St
         text_color: Some(color_from_rgb(p.text)),
         border: Border {
             radius: 999.0.into(),
-            width: 1.0,
-            color: white(0.08),
+            ..Default::default()
         },
         ..Default::default()
     }
@@ -703,9 +1135,9 @@ pub fn toggler_style(p: DynamicPalette) -> impl Fn(&Theme, toggler::Status) -> t
             background: if is_toggled {
                 if hovered {
                     Color::from_rgb(
-                        (accent.r + 0.10).min(1.0),
-                        (accent.g + 0.06).min(1.0),
-                        (accent.b + 0.10).min(1.0),
+                        (accent.r + 0.09).min(1.0),
+                        (accent.g + 0.09).min(1.0),
+                        (accent.b + 0.09).min(1.0),
                     )
                 } else {
                     accent

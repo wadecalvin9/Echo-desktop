@@ -1,5 +1,13 @@
-use crate::models::{AlbumRef, ArtistRef, PendingScrobble, Playlist, RecognitionEntry, Track, TrackStats};
+use crate::models::{
+    AlbumRef, AlbumStats, ArtistRef, ArtistStats, DailyListening, ListeningSummary, PendingScrobble,
+    Playlist, RecognitionEntry, Track, TrackStats,
+};
+use crate::recommendations::{
+    build_recommendations, EngineOutput, ListenRecord, RelatedEdge,
+};
+use chrono::{Datelike, Local, NaiveDate, TimeZone, Timelike};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
@@ -116,6 +124,20 @@ impl EchoDb {
                 created_at_ms INTEGER NOT NULL,
                 FOREIGN KEY (song_id) REFERENCES songs(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS related_edges (
+                seed_id TEXT NOT NULL,
+                related_id TEXT NOT NULL,
+                source INTEGER NOT NULL DEFAULT 0,
+                updated_at_ms INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (seed_id, related_id, source),
+                FOREIGN KEY (related_id) REFERENCES songs(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS home_impressions (
+                song_id TEXT NOT NULL,
+                shown_at_ms INTEGER NOT NULL
+            );
             ",
         )?;
         Ok(())
@@ -130,42 +152,144 @@ impl EchoDb {
 
     pub fn upsert_track(&self, track: &Track) -> Result<(), DbError> {
         let now_ms = chrono::Utc::now().timestamp_millis();
-        let artists_json = serde_json::to_string(&track.artists)?;
         let conn = self.conn.lock().expect("db mutex poisoned");
-        conn.execute(
-            "
-            INSERT INTO songs (
-                id, title, artists_json, album_id, album_title, duration_secs,
-                thumbnail_url, loudness_db, liked, is_local, local_path, updated_at_ms
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            ON CONFLICT(id) DO UPDATE SET
-                title = excluded.title,
-                artists_json = excluded.artists_json,
-                album_id = COALESCE(excluded.album_id, songs.album_id),
-                album_title = COALESCE(excluded.album_title, songs.album_title),
-                duration_secs = COALESCE(excluded.duration_secs, songs.duration_secs),
-                thumbnail_url = COALESCE(excluded.thumbnail_url, songs.thumbnail_url),
-                loudness_db = COALESCE(excluded.loudness_db, songs.loudness_db),
-                is_local = excluded.is_local,
-                local_path = COALESCE(excluded.local_path, songs.local_path),
-                updated_at_ms = excluded.updated_at_ms
-            ",
-            params![
-                track.id,
-                track.title,
-                artists_json,
-                track.album.as_ref().and_then(|a| a.id.clone()),
-                track.album.as_ref().map(|a| a.title.clone()),
-                track.duration_secs.map(|d| d as i64),
-                track.thumbnail_url,
-                track.loudness_db.map(|v| v as f64),
-                i64::from(track.liked),
-                i64::from(track.is_local),
-                track.local_path,
-                now_ms,
-            ],
-        )?;
+        upsert_track_conn(&conn, track, now_ms)
+    }
+
+    pub fn save_related_edges(
+        &self,
+        seed_id: &str,
+        related: &[Track],
+        source: u8,
+    ) -> Result<(), DbError> {
+        if seed_id.trim().is_empty() || related.is_empty() {
+            return Ok(());
+        }
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let mut conn = self.conn.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        for t in related {
+            if t.id == seed_id || t.id.trim().is_empty() {
+                continue;
+            }
+            upsert_track_conn(&tx, t, now_ms)?;
+            tx.execute(
+                "INSERT OR REPLACE INTO related_edges (seed_id, related_id, source, updated_at_ms)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![seed_id, t.id, i64::from(source), now_ms],
+            )?;
+        }
+        tx.commit()?;
         Ok(())
+    }
+
+    pub fn record_home_impressions(&self, song_ids: &[String]) -> Result<(), DbError> {
+        if song_ids.is_empty() {
+            return Ok(());
+        }
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let cutoff = now_ms - 14 * 86_400_000;
+        let mut conn = self.conn.lock().expect("db mutex poisoned");
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM home_impressions WHERE shown_at_ms < ?1",
+            params![cutoff],
+        )?;
+        for id in song_ids {
+            tx.execute(
+                "INSERT INTO home_impressions (song_id, shown_at_ms) VALUES (?1, ?2)",
+                params![id, now_ms],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn build_home_recommendations(
+        &self,
+        disliked_artists: &HashSet<String>,
+        desired_picks: usize,
+        rotation_cursor: usize,
+    ) -> Result<EngineOutput, DbError> {
+        let now_ms = chrono::Utc::now().timestamp_millis();
+        let imp_cutoff = now_ms - 14 * 86_400_000;
+        let edge_cutoff = now_ms - 7 * 86_400_000;
+
+        let conn = self.conn.lock().expect("db mutex poisoned");
+
+        let mut songs: HashMap<String, Track> = HashMap::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT id, title, artists_json, album_id, album_title, duration_secs,
+                        thumbnail_url, loudness_db, liked, is_local, local_path
+                 FROM songs",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(r) = rows.next()? {
+                let t = row_to_track(r)?;
+                songs.insert(t.id.clone(), t);
+            }
+        }
+
+        let mut listens = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT song_id, played_at_ms, duration_played_secs FROM play_history",
+            )?;
+            let mut rows = stmt.query([])?;
+            while let Some(r) = rows.next()? {
+                listens.push(ListenRecord {
+                    song_id: r.get(0)?,
+                    played_at_ms: r.get(1)?,
+                    duration_played_secs: r.get::<_, i64>(2)?.max(0) as u64,
+                });
+            }
+        }
+
+        let mut edges = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT seed_id, related_id, source, updated_at_ms
+                 FROM related_edges
+                 WHERE updated_at_ms >= ?1",
+            )?;
+            let mut rows = stmt.query(params![edge_cutoff])?;
+            while let Some(r) = rows.next()? {
+                edges.push(RelatedEdge {
+                    seed_id: r.get(0)?,
+                    related_id: r.get(1)?,
+                    source: r.get::<_, i64>(2)? as u8,
+                    updated_at_ms: r.get(3)?,
+                });
+            }
+        }
+
+        let mut impressions: HashMap<String, usize> = HashMap::new();
+        {
+            let mut stmt = conn.prepare(
+                "SELECT song_id, COUNT(*)
+                 FROM home_impressions
+                 WHERE shown_at_ms >= ?1
+                 GROUP BY song_id",
+            )?;
+            let mut rows = stmt.query(params![imp_cutoff])?;
+            while let Some(r) = rows.next()? {
+                let id: String = r.get(0)?;
+                let cnt: i64 = r.get(1)?;
+                impressions.insert(id, cnt.max(0) as usize);
+            }
+        }
+
+        Ok(build_recommendations(
+            now_ms,
+            &songs,
+            &listens,
+            &edges,
+            &impressions,
+            disliked_artists,
+            desired_picks,
+            rotation_cursor,
+        ))
     }
 
     pub fn set_liked(&self, song_id: &str, liked: bool) -> Result<(), DbError> {
@@ -295,6 +419,259 @@ impl EchoDb {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    /// Aggregates listening analytics (totals, streak, 14-day rhythm, 24h clock, top artists/albums/tracks).
+    pub fn listening_summary(
+        &self,
+        days_window: Option<u32>,
+        top_limit: usize,
+    ) -> Result<ListeningSummary, DbError> {
+        let cutoff_ms = match days_window {
+            Some(days) => {
+                (chrono::Utc::now() - chrono::Duration::days(days as i64)).timestamp_millis()
+            }
+            None => i64::MIN,
+        };
+
+        let conn = self.conn.lock().expect("db mutex poisoned");
+        let mut stmt = conn.prepare(
+            "SELECT s.id, s.title, s.artists_json, s.album_id, s.album_title, s.duration_secs,
+                    s.thumbnail_url, s.loudness_db, s.liked, s.is_local, s.local_path,
+                    h.played_at_ms, h.duration_played_secs
+             FROM play_history h
+             JOIN songs s ON s.id = h.song_id
+             WHERE h.played_at_ms >= ?1
+             ORDER BY h.played_at_ms DESC",
+        )?;
+
+        struct TrackAcc {
+            track: Track,
+            play_count: u64,
+            total_played_secs: u64,
+            last_played_ms: i64,
+        }
+        struct ArtistAcc {
+            id: Option<String>,
+            name: String,
+            play_count: u64,
+            total_played_secs: u64,
+            track_ids: HashSet<String>,
+            thumbnail_url: Option<String>,
+        }
+        struct AlbumAcc {
+            id: Option<String>,
+            title: String,
+            artist: String,
+            play_count: u64,
+            total_played_secs: u64,
+            thumbnail_url: Option<String>,
+        }
+
+        let mut summary = ListeningSummary::default();
+        let mut tracks: HashMap<String, TrackAcc> = HashMap::new();
+        let mut artists: HashMap<String, ArtistAcc> = HashMap::new();
+        let mut albums: HashMap<String, AlbumAcc> = HashMap::new();
+        let mut daily_map: HashMap<NaiveDate, (u64, u64)> = HashMap::new();
+        let mut active_dates: HashSet<NaiveDate> = HashSet::new();
+
+        let mut rows = stmt.query(params![cutoff_ms])?;
+        while let Some(row) = rows.next()? {
+            let track = row_to_track(row)?;
+            let played_at_ms: i64 = row.get(11)?;
+            let dur_secs: u64 = row.get::<_, i64>(12)?.max(0) as u64;
+
+            summary.total_plays += 1;
+            summary.total_played_secs += dur_secs;
+            if track.is_local {
+                summary.local_plays += 1;
+            } else {
+                summary.online_plays += 1;
+            }
+
+            if let Some(local_dt) = Local.timestamp_millis_opt(played_at_ms).single() {
+                let hour = local_dt.hour() as usize;
+                if hour < 24 {
+                    summary.hourly_plays[hour] += 1;
+                }
+                let date = local_dt.date_naive();
+                active_dates.insert(date);
+                let day_entry = daily_map.entry(date).or_insert((0, 0));
+                day_entry.0 += 1;
+                day_entry.1 += dur_secs;
+            }
+
+            let t_entry = tracks.entry(track.id.clone()).or_insert_with(|| TrackAcc {
+                track: track.clone(),
+                play_count: 0,
+                total_played_secs: 0,
+                last_played_ms: played_at_ms,
+            });
+            t_entry.play_count += 1;
+            t_entry.total_played_secs += dur_secs;
+            t_entry.last_played_ms = t_entry.last_played_ms.max(played_at_ms);
+
+            for artist in &track.artists {
+                let name = artist.name.trim();
+                if name.is_empty() {
+                    continue;
+                }
+                let key = name.to_lowercase();
+                let a_entry = artists.entry(key).or_insert_with(|| ArtistAcc {
+                    id: artist.id.clone(),
+                    name: name.to_string(),
+                    play_count: 0,
+                    total_played_secs: 0,
+                    track_ids: HashSet::new(),
+                    thumbnail_url: track.thumbnail_url.clone(),
+                });
+                a_entry.play_count += 1;
+                a_entry.total_played_secs += dur_secs;
+                a_entry.track_ids.insert(track.id.clone());
+                if a_entry.id.is_none() {
+                    a_entry.id = artist.id.clone();
+                }
+                if a_entry.thumbnail_url.is_none() {
+                    a_entry.thumbnail_url = track.thumbnail_url.clone();
+                }
+            }
+
+            if let Some(alb) = &track.album {
+                let title = alb.title.trim();
+                if !title.is_empty() {
+                    let key = if let Some(id) = alb.id.as_deref().filter(|s| !s.is_empty()) {
+                        id.to_string()
+                    } else {
+                        format!("name::{}", title.to_lowercase())
+                    };
+                    let al_entry = albums.entry(key).or_insert_with(|| AlbumAcc {
+                        id: alb.id.clone(),
+                        title: title.to_string(),
+                        artist: track.artist_display(),
+                        play_count: 0,
+                        total_played_secs: 0,
+                        thumbnail_url: track.thumbnail_url.clone(),
+                    });
+                    al_entry.play_count += 1;
+                    al_entry.total_played_secs += dur_secs;
+                    if al_entry.thumbnail_url.is_none() {
+                        al_entry.thumbnail_url = track.thumbnail_url.clone();
+                    }
+                }
+            }
+        }
+
+        summary.unique_tracks = tracks.len() as u64;
+        summary.unique_artists = artists.len() as u64;
+        summary.active_days = active_dates.len() as u64;
+        summary.peak_hour = summary
+            .hourly_plays
+            .iter()
+            .enumerate()
+            .filter(|(_, &c)| c > 0)
+            .max_by_key(|(h, &c)| (c, std::cmp::Reverse(*h)))
+            .map(|(h, _)| h as u8);
+
+        let today = Local::now().date_naive();
+        let mut cursor = if active_dates.contains(&today) {
+            Some(today)
+        } else {
+            today
+                .pred_opt()
+                .filter(|yesterday| active_dates.contains(yesterday))
+        };
+        let mut streak = 0u32;
+        while let Some(d) = cursor {
+            if active_dates.contains(&d) {
+                streak += 1;
+                cursor = d.pred_opt();
+            } else {
+                break;
+            }
+        }
+        summary.current_streak_days = streak;
+
+        summary.daily_activity = (0..14)
+            .rev()
+            .map(|offset| {
+                let d = today - chrono::Duration::days(offset);
+                let (plays, total_secs) = daily_map.get(&d).copied().unwrap_or((0, 0));
+                let day_short = match d.weekday() {
+                    chrono::Weekday::Mon => "M",
+                    chrono::Weekday::Tue => "T",
+                    chrono::Weekday::Wed => "W",
+                    chrono::Weekday::Thu => "T",
+                    chrono::Weekday::Fri => "F",
+                    chrono::Weekday::Sat => "S",
+                    chrono::Weekday::Sun => "S",
+                }
+                .to_string();
+                DailyListening {
+                    day_short,
+                    date_short: d.format("%b %d").to_string(),
+                    plays,
+                    total_secs,
+                }
+            })
+            .collect();
+
+        let mut top_tracks: Vec<TrackStats> = tracks
+            .into_values()
+            .map(|t| TrackStats {
+                track: t.track,
+                play_count: t.play_count,
+                total_played_secs: t.total_played_secs,
+                last_played_ms: t.last_played_ms,
+            })
+            .collect();
+        top_tracks.sort_by(|a, b| {
+            b.play_count
+                .cmp(&a.play_count)
+                .then_with(|| b.total_played_secs.cmp(&a.total_played_secs))
+                .then_with(|| b.last_played_ms.cmp(&a.last_played_ms))
+        });
+        top_tracks.truncate(top_limit);
+        summary.top_tracks = top_tracks;
+
+        let mut top_artists: Vec<ArtistStats> = artists
+            .into_values()
+            .map(|a| ArtistStats {
+                id: a.id,
+                name: a.name,
+                play_count: a.play_count,
+                total_played_secs: a.total_played_secs,
+                track_count: a.track_ids.len() as u64,
+                thumbnail_url: a.thumbnail_url,
+            })
+            .collect();
+        top_artists.sort_by(|a, b| {
+            b.play_count
+                .cmp(&a.play_count)
+                .then_with(|| b.total_played_secs.cmp(&a.total_played_secs))
+        });
+        top_artists.truncate(8);
+        summary.top_artists = top_artists;
+
+        let mut top_albums: Vec<AlbumStats> = albums
+            .into_values()
+            .map(|al| AlbumStats {
+                id: al.id,
+                title: al.title,
+                artist: al.artist,
+                play_count: al.play_count,
+                total_played_secs: al.total_played_secs,
+                thumbnail_url: al.thumbnail_url,
+            })
+            .collect();
+        top_albums.sort_by(|a, b| {
+            b.play_count
+                .cmp(&a.play_count)
+                .then_with(|| b.total_played_secs.cmp(&a.total_played_secs))
+        });
+        top_albums.truncate(6);
+        summary.top_albums = top_albums;
+
+        Ok(summary)
     }
 
     pub fn add_recognition(
@@ -600,5 +977,43 @@ fn row_to_track(row: &rusqlite::Row<'_>) -> rusqlite::Result<Track> {
         is_local: row.get::<_, i64>(9)? != 0,
         local_path: row.get(10)?,
     })
+}
+
+fn upsert_track_conn(conn: &Connection, track: &Track, now_ms: i64) -> Result<(), DbError> {
+    let artists_json = serde_json::to_string(&track.artists)?;
+    conn.execute(
+        "
+        INSERT INTO songs (
+            id, title, artists_json, album_id, album_title, duration_secs,
+            thumbnail_url, loudness_db, liked, is_local, local_path, updated_at_ms
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+        ON CONFLICT(id) DO UPDATE SET
+            title = excluded.title,
+            artists_json = excluded.artists_json,
+            album_id = COALESCE(excluded.album_id, songs.album_id),
+            album_title = COALESCE(excluded.album_title, songs.album_title),
+            duration_secs = COALESCE(excluded.duration_secs, songs.duration_secs),
+            thumbnail_url = COALESCE(excluded.thumbnail_url, songs.thumbnail_url),
+            loudness_db = COALESCE(excluded.loudness_db, songs.loudness_db),
+            is_local = excluded.is_local,
+            local_path = COALESCE(excluded.local_path, songs.local_path),
+            updated_at_ms = excluded.updated_at_ms
+        ",
+        params![
+            track.id,
+            track.title,
+            artists_json,
+            track.album.as_ref().and_then(|a| a.id.clone()),
+            track.album.as_ref().map(|a| a.title.clone()),
+            track.duration_secs.map(|d| d as i64),
+            track.thumbnail_url,
+            track.loudness_db.map(|v| v as f64),
+            i64::from(track.liked),
+            i64::from(track.is_local),
+            track.local_path,
+            now_ms,
+        ],
+    )?;
+    Ok(())
 }
 

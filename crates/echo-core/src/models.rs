@@ -247,6 +247,52 @@ pub struct TrackStats {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtistStats {
+    pub id: Option<String>,
+    pub name: String,
+    pub play_count: u64,
+    pub total_played_secs: u64,
+    pub track_count: u64,
+    pub thumbnail_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AlbumStats {
+    pub id: Option<String>,
+    pub title: String,
+    pub artist: String,
+    pub play_count: u64,
+    pub total_played_secs: u64,
+    pub thumbnail_url: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DailyListening {
+    pub day_short: String,
+    pub date_short: String,
+    pub plays: u64,
+    pub total_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct ListeningSummary {
+    pub total_plays: u64,
+    pub total_played_secs: u64,
+    pub unique_tracks: u64,
+    pub unique_artists: u64,
+    pub online_plays: u64,
+    pub local_plays: u64,
+    pub active_days: u64,
+    pub current_streak_days: u32,
+    pub peak_hour: Option<u8>,
+    pub hourly_plays: [u64; 24],
+    pub daily_activity: Vec<DailyListening>,
+    pub top_artists: Vec<ArtistStats>,
+    pub top_albums: Vec<AlbumStats>,
+    pub top_tracks: Vec<TrackStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingScrobble {
     pub id: i64,
     pub artist: String,
