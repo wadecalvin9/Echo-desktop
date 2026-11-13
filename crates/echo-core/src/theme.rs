@@ -32,8 +32,8 @@ impl RgbColor {
     }
 }
 
-/// Echo's fixed default accent (neutral silver-gray).
-pub const ACCENT: RgbColor = RgbColor::from_u8(184, 189, 198);
+/// Echo's fixed default accent (Nordic Sage #5E9B78 - calm, organic, understated).
+pub const ACCENT: RgbColor = RgbColor::from_u8(94, 155, 120);
 
 /// Derives a vivid, high-contrast accent color from an album cover seed for `ThemeMode::Dynamic`.
 /// Falls back toward [`ACCENT`] when the cover is nearly grayscale.
@@ -49,12 +49,12 @@ fn derive_dynamic_accent(seed: RgbColor) -> RgbColor {
         return ACCENT;
     }
 
-    // Normalize hue by scaling peak channel to 1.0, then pull shadows up slightly so
-    // the accent stays vibrant yet legible with black foreground glyphs.
-    let inv = 1.0 / max_c;
-    let mut r = (seed.r * inv).clamp(0.0, 1.0);
-    let mut g = (seed.g * inv).clamp(0.0, 1.0);
-    let mut b = (seed.b * inv).clamp(0.0, 1.0);
+    // Scale peak channel moderately rather than blasting saturation to 100%,
+    // keeping dynamic accents rich and legible without screaming fluorescent tones.
+    let scale = (1.0 / max_c.max(0.25)).min(1.35);
+    let mut r = (seed.r * scale).clamp(0.0, 1.0);
+    let mut g = (seed.g * scale).clamp(0.0, 1.0);
+    let mut b = (seed.b * scale).clamp(0.0, 1.0);
 
     // Ensure perceptual luma is bright enough (>= 0.56) for black icons/text on accent pills.
     let mut candidate = RgbColor { r, g, b };
