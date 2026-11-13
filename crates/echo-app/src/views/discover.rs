@@ -20,7 +20,7 @@ use crate::theme::{
     top_pill_button_style, with_alpha,
 };
 use crate::{
-    bold, ellipsize, greeting_label, semibold, text, DetailPage, EchoApp,
+    bold, dynamic_greeting, ellipsize, semibold, text, DetailPage, EchoApp,
     LibraryTab, Message, NavTab,
 };
 
@@ -425,6 +425,7 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         title: &'a str,
         items: &'a [BrowseItem],
         show_explore_link: bool,
+        reorder: Option<(usize, usize)>,
     ) -> Element<'a, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
@@ -451,7 +452,59 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                 .into()
         });
 
+        let sub_text: Option<&'static str> = {
+            let t = title.to_lowercase();
+            if t.contains("mix") {
+                Some("Personalized mixes shaped by your music taste")
+            } else if t.contains("artist") {
+                Some("Bringing together the top songs from your favorite artists")
+            } else if t.contains("new") || t.contains("friday") || t.contains("release") {
+                Some("The newest tracks and fresh drops ready to stream")
+            } else if t.contains("chart") || t.contains("trending") {
+                Some("The most popular music right now")
+            } else {
+                None
+            }
+        };
+
         let mut header_right = row![].spacing(6).align_y(Alignment::Center);
+
+        if let Some((idx, total)) = reorder {
+            if total > 1 {
+                let can_up = idx > 0;
+                let can_down = idx + 1 < total;
+                let up_btn = button(icons::icon(
+                    icons::CHEVRON_UP,
+                    14.0,
+                    if can_up { Color::WHITE } else { with_alpha(muted, 0.25) },
+                ))
+                .padding([4, 6])
+                .style(icon_button_style(p, false));
+                let up_btn = if can_up {
+                    up_btn.on_press(Message::MoveHomeSectionUp(idx))
+                } else {
+                    up_btn
+                };
+
+                let down_btn = button(icons::icon(
+                    icons::CHEVRON_DOWN,
+                    14.0,
+                    if can_down { Color::WHITE } else { with_alpha(muted, 0.25) },
+                ))
+                .padding([4, 6])
+                .style(icon_button_style(p, false));
+                let down_btn = if can_down {
+                    down_btn.on_press(Message::MoveHomeSectionDown(idx))
+                } else {
+                    down_btn
+                };
+
+                header_right = header_right
+                    .push(self.with_tooltip(up_btn, "Move section up", iced::widget::tooltip::Position::Top))
+                    .push(self.with_tooltip(down_btn, "Move section down", iced::widget::tooltip::Position::Top));
+            }
+        }
+
         if items.len() > per_page {
             let prev_btn = button(
                 container(icons::icon(
@@ -499,19 +552,28 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
 
             header_right = header_right.push(prev_btn).push(next_btn);
         }
-        if show_explore_link {
-            header_right = header_right.push(
-                button(text("Explore all").size(12).font(semibold()).color(muted))
-                    .padding([5, 10])
-                    .style(ghost_row_button_style(p, false))
-                    .on_press(Message::SelectTab(NavTab::Explore)),
-            );
-        }
+
+        header_right = header_right.push(
+            button(text(if show_explore_link { "Explore all" } else { "Show all" }).size(12).font(bold()).color(muted))
+                .padding([5, 10])
+                .style(ghost_row_button_style(p, false))
+                .on_press(Message::SelectTab(NavTab::Explore)),
+        );
+
+        let title_block = if let Some(sub) = sub_text {
+            column![
+                text(title).size(22).font(bold()),
+                text(sub).size(12).color(muted),
+            ]
+            .spacing(2)
+        } else {
+            column![text(title).size(22).font(bold())].spacing(0)
+        };
 
         container(
             column![
                 row![
-                    text(title).size(22).font(bold()),
+                    title_block,
                     horizontal_space(),
                     header_right,
                 ]
@@ -675,16 +737,11 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             }
         }
 
-        let kicker = "MADE FOR YOU".to_string();
-        let subline = if self.listener_ctx.known {
-            "Personalized picks shaped by your taste graph & active session".to_string()
-        } else {
-            "Fresh tracks, artists & mixes ready to play".to_string()
-        };
+        let (kicker, greeting, subline) = dynamic_greeting(self.listener_ctx.known);
         let greeting_row = row![
             column![
                 text(kicker).size(11).font(bold()).color(accent),
-                text(greeting_label()).size(30).font(bold()),
+                text(greeting).size(30).font(bold()),
                 text(subline).size(12).color(muted),
             ]
             .spacing(3),
@@ -828,12 +885,14 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             .style(hero_banner_style(p));
 
         let mut content = column![header].spacing(6);
+        let total_home_sections = self.home_sections.len();
         for (idx, sec) in self.home_sections.iter().enumerate() {
             content = content.push(self.browse_shelf_section(
                 format!("home:{idx}:{}", sec.title),
                 &sec.title,
                 &sec.items,
                 idx == 0,
+                Some((idx, total_home_sections)),
             ));
         }
 
@@ -909,6 +968,7 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                     "New Releases",
                     &explore.new_release_albums,
                     false,
+                    None,
                 ));
             }
 
@@ -1127,6 +1187,7 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                         "Other Versions",
                         &alb.other_versions,
                         false,
+                        None,
                     ));
                 }
 

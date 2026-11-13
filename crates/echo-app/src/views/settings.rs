@@ -11,8 +11,8 @@ use iced::{Color, Element, Font, Length};
 
 use crate::icons;
 use crate::theme::{
-    badge_pill_style, card_icon_badge_style, color_from_rgb, divider_style, eq_band_strip_style,
-    ghost_row_button_style, hero_banner_style, icon_button_style, logo_badge_style,
+    badge_pill_style, color_from_rgb, divider_style, eq_band_strip_style,
+    ghost_row_button_style, icon_button_style,
     nav_tab_badge_style, outlined_pill_button_style, pick_list_menu_style, pick_list_style,
     pill_search_input_style, scroll_style, search_field_style, segmented_pill_style,
     settings_card_style, slim_slider_style, stat_bar_fill_style, stat_bar_track_style,
@@ -59,7 +59,7 @@ impl EchoApp {    fn settings_row<'a>(
 
     fn settings_card_header<'a>(
         &self,
-        icon_bytes: &'static [u8],
+        _icon_bytes: &'static [u8],
         title: &'static str,
         subtitle: &'static str,
         accessory: Option<Element<'a, Message>>,
@@ -67,12 +67,9 @@ impl EchoApp {    fn settings_row<'a>(
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
         let mut r = row![
-            container(icons::icon(icon_bytes, 16.0, color_from_rgb(p.primary)))
-                .padding(8)
-                .style(card_icon_badge_style(p)),
             column![
-                text(title).size(15).font(bold()),
-                text(subtitle).size(11).color(muted),
+                text(title).size(17).font(bold()),
+                text(subtitle).size(12).color(muted),
             ]
             .spacing(2)
             .width(Length::Fill),
@@ -134,32 +131,17 @@ impl EchoApp {    fn settings_row<'a>(
         .height(36)
         .width(Length::Fill);
 
-        let header = container(
+        let header = row![
             column![
-                row![
-                    container(icons::icon(icons::SETTINGS, 22.0, Color::BLACK))
-                        .width(42)
-                        .height(42)
-                        .align_x(iced::alignment::Horizontal::Center)
-                        .align_y(iced::alignment::Vertical::Center)
-                        .style(logo_badge_style(p)),
-                    column![
-                        text("Settings").size(24).font(bold()),
-                        text("Audio engine & DSP, library media indexing, account sync, and appearance")
-                            .size(12)
-                            .color(muted),
-                    ]
-                    .spacing(2),
-                ]
-                .spacing(14)
-                .align_y(Alignment::Center),
-                pills_bar,
+                text("Settings").size(32).font(bold()),
+                text("Audio, library, playback preferences & appearance").size(13).color(muted),
             ]
-            .spacing(14),
-        )
-        .padding([18, 22])
-        .width(Length::Fill)
-        .style(hero_banner_style(p));
+            .spacing(2),
+            horizontal_space(),
+            pills_bar,
+        ]
+        .spacing(16)
+        .align_y(Alignment::Center);
 
         let row_divider = || -> Element<'static, Message> {
             container(horizontal_space())
@@ -1417,17 +1399,21 @@ impl EchoApp {    fn settings_row<'a>(
             }
         }
 
-        let pad_h = if self.center_width() < 720.0 { 12 } else { 20 };
+        let pad_h = if self.center_width() < 720.0 { 16 } else { 28 };
         self.vscroll(
-            column![
-                header,
-                container(
-                    column(cards).spacing(14)
-                )
-                .padding([12, pad_h]),
-                vertical_space().height(36),
-            ]
-            .spacing(12),
+            container(
+                column![
+                    header,
+                    vertical_space().height(12),
+                    column(cards).spacing(22),
+                    vertical_space().height(44),
+                ]
+                .spacing(12)
+                .max_width(840),
+            )
+            .width(Length::Fill)
+            .padding([24, pad_h])
+            .align_x(iced::alignment::Horizontal::Center),
         )
     }
 

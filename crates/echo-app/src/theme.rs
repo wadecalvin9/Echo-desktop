@@ -69,24 +69,20 @@ pub fn elevated_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::S
 
 pub fn settings_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
-        let base = color_from_rgb(p.surface_elevated);
         container::Style {
-            background: Some(Background::Color(base)),
+            background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.035))),
             text_color: Some(color_from_rgb(p.text)),
             border: Border {
                 color: white(0.06),
                 width: 1.0,
                 radius: 12.0.into(),
             },
-            shadow: Shadow {
-                color: Color::from_rgba(0.0, 0.0, 0.0, 0.20),
-                offset: Vector::new(0.0, 2.0),
-                blur_radius: 8.0,
-            },
+            ..Default::default()
         }
     }
 }
 
+#[allow(dead_code)]
 pub fn card_icon_badge_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
         let accent = color_from_rgb(p.primary);

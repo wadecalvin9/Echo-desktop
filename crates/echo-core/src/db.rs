@@ -140,6 +140,14 @@ impl EchoDb {
             );
             ",
         )?;
+        let _ = conn.execute(
+            "ALTER TABLE songs ADD COLUMN liked_at_ms INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+        let _ = conn.execute(
+            "UPDATE songs SET liked_at_ms = updated_at_ms WHERE liked = 1 AND liked_at_ms = 0",
+            [],
+        );
         Ok(())
     }
 
@@ -294,9 +302,10 @@ impl EchoDb {
 
     pub fn set_liked(&self, song_id: &str, liked: bool) -> Result<(), DbError> {
         let conn = self.conn.lock().expect("db mutex poisoned");
+        let now_ms = chrono::Utc::now().timestamp_millis();
         conn.execute(
-            "UPDATE songs SET liked = ?1 WHERE id = ?2",
-            params![i64::from(liked), song_id],
+            "UPDATE songs SET liked = ?1, liked_at_ms = CASE WHEN ?1 = 1 THEN ?2 ELSE 0 END WHERE id = ?3",
+            params![i64::from(liked), now_ms, song_id],
         )?;
         Ok(())
     }
@@ -327,7 +336,7 @@ impl EchoDb {
         let mut stmt = conn.prepare(
             "SELECT id, title, artists_json, album_id, album_title, duration_secs,
                     thumbnail_url, loudness_db, liked, is_local, local_path
-             FROM songs WHERE liked = 1 ORDER BY updated_at_ms DESC",
+             FROM songs WHERE liked = 1 ORDER BY liked_at_ms DESC, rowid DESC",
         )?;
         let rows = stmt.query_map([], row_to_track)?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
@@ -985,8 +994,8 @@ fn upsert_track_conn(conn: &Connection, track: &Track, now_ms: i64) -> Result<()
         "
         INSERT INTO songs (
             id, title, artists_json, album_id, album_title, duration_secs,
-            thumbnail_url, loudness_db, liked, is_local, local_path, updated_at_ms
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            thumbnail_url, loudness_db, liked, is_local, local_path, updated_at_ms, liked_at_ms
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, CASE WHEN ?9 = 1 THEN ?12 ELSE 0 END)
         ON CONFLICT(id) DO UPDATE SET
             title = excluded.title,
             artists_json = excluded.artists_json,
@@ -997,7 +1006,13 @@ fn upsert_track_conn(conn: &Connection, track: &Track, now_ms: i64) -> Result<()
             loudness_db = COALESCE(excluded.loudness_db, songs.loudness_db),
             is_local = excluded.is_local,
             local_path = COALESCE(excluded.local_path, songs.local_path),
-            updated_at_ms = excluded.updated_at_ms
+            updated_at_ms = excluded.updated_at_ms,
+            liked = CASE WHEN songs.liked = 1 THEN 1 ELSE excluded.liked END,
+            liked_at_ms = CASE
+                WHEN songs.liked = 1 AND songs.liked_at_ms > 0 THEN songs.liked_at_ms
+                WHEN excluded.liked = 1 THEN ?12
+                ELSE 0
+            END
         ",
         params![
             track.id,

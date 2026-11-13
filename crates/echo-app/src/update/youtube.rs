@@ -432,6 +432,18 @@ impl EchoApp {
                 self.clear_detail();
                 self.update(Message::SubmitSearch)
             }
+            Message::MoveHomeSectionUp(idx) => {
+                if idx > 0 && idx < self.home_sections.len() {
+                    self.home_sections.swap(idx, idx - 1);
+                }
+                Task::none()
+            }
+            Message::MoveHomeSectionDown(idx) => {
+                if idx + 1 < self.home_sections.len() {
+                    self.home_sections.swap(idx, idx + 1);
+                }
+                Task::none()
+            }
             Message::SearchFilterSelected(f) => {
                 self.search_filter = f;
                 if !self.search_query.trim().is_empty() {

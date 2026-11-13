@@ -346,6 +346,71 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                 } else {
                     let mut list = column![].spacing(14);
 
+                    let cur_idx = self.queue.current_index.unwrap_or(0);
+                    let mut prev_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
+                    let mut user_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
+                    let mut context_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
+
+                    for (idx, item) in self.queue.items.iter().enumerate() {
+                        if idx < cur_idx {
+                            prev_items.push((idx, item));
+                        } else if idx > cur_idx {
+                            if item.is_user_queued {
+                                user_items.push((idx, item));
+                            } else {
+                                context_items.push((idx, item));
+                            }
+                        }
+                    }
+
+                    if !prev_items.is_empty() {
+                        let mut prev_col = column![
+                            row![
+                                text("Previous Tracks").size(12).font(bold()).color(muted),
+                                horizontal_space(),
+                                text(format!("{} earlier", prev_items.len())).size(11).color(muted),
+                            ]
+                            .align_y(Alignment::Center),
+                        ]
+                        .spacing(4);
+
+                        let show_count = prev_items.len().min(3);
+                        for (idx, item) in prev_items.iter().rev().take(show_count).rev() {
+                            let idx = *idx;
+                            prev_col = prev_col.push(
+                                button(
+                                    row![
+                                        self.artwork_widget(
+                                            item.track.thumbnail_url.as_deref(),
+                                            32.0,
+                                            false,
+                                        ),
+                                        column![
+                                            text(ellipsize(&item.track.title, 24))
+                                                .size(12)
+                                                .font(semibold())
+                                                .color(with_alpha(Color::WHITE, 0.60))
+                                                .wrapping(Wrapping::None),
+                                            text(ellipsize(&item.track.artist_display(), 26))
+                                                .size(11)
+                                                .color(with_alpha(muted, 0.70))
+                                                .wrapping(Wrapping::None),
+                                        ]
+                                        .spacing(2)
+                                        .width(Length::Fill),
+                                    ]
+                                    .spacing(8)
+                                    .align_y(Alignment::Center),
+                                )
+                                .width(Length::Fill)
+                                .padding([4, 6])
+                                .style(ghost_row_button_style(p, false))
+                                .on_press(Message::QueueJump(idx)),
+                            );
+                        }
+                        list = list.push(prev_col);
+                    }
+
                     // Section 1: Now Playing
                     if let Some(cur_idx) = self.queue.current_index {
                         if let Some(cur) = self.queue.items.get(cur_idx) {
@@ -388,21 +453,6 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                                 ]
                                 .spacing(6),
                             );
-                        }
-                    }
-
-                    // Partition remaining tracks into User-Queued vs Context-Queue
-                    let cur_idx = self.queue.current_index.unwrap_or(0);
-                    let mut user_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
-                    let mut context_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
-
-                    for (idx, item) in self.queue.items.iter().enumerate() {
-                        if idx > cur_idx {
-                            if item.is_user_queued {
-                                user_items.push((idx, item));
-                            } else {
-                                context_items.push((idx, item));
-                            }
                         }
                     }
 

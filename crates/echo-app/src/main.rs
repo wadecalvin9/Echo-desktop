@@ -563,6 +563,8 @@ impl EchoApp {
             | Message::SuggestionsLoaded(..)
             | Message::CloseSearchDropdown
             | Message::ApplySuggestion(..)
+            | Message::MoveHomeSectionUp(..)
+            | Message::MoveHomeSectionDown(..)
             | Message::SearchFilterSelected(..)
             | Message::SubmitSearch
             | Message::LoadMoreSearch
@@ -931,23 +933,26 @@ impl EchoApp {
 
 }
 
-pub(crate) fn greeting_label() -> &'static str {
-    match chrono::Local::now().hour() {
-        5..=11 => "Good morning",
-        12..=16 => "Good afternoon",
-        17..=21 => "Good evening",
-        _ => "Late night listening",
-    }
-}
+pub(crate) fn dynamic_greeting(known_taste: bool) -> (&'static str, String, &'static str) {
+    let now = chrono::Local::now();
+    let hour = now.hour();
+    let weekday = now.format("%A").to_string();
 
-#[allow(dead_code)]
-pub(crate) fn greeting_kicker() -> &'static str {
-    match chrono::Local::now().hour() {
-        5..=11 => "MORNING ROTATION",
-        12..=16 => "MIDDAY FLOW",
-        17..=21 => "EVENING SESSION",
-        _ => "AFTER HOURS",
-    }
+    let (kicker, title) = match hour {
+        5..=10 => ("MORNING FLOW", format!("Start Your {weekday}")),
+        11..=13 => ("MIDDAY BEATS", "Your Midday Soundtrack".to_string()),
+        14..=17 => ("AFTERNOON ROTATION", "Jump Back In".to_string()),
+        18..=22 => ("EVENING SESSIONS", format!("{weekday} Evening Vibes")),
+        _ => ("AFTER HOURS", "Late Night Frequency".to_string()),
+    };
+
+    let sub = if known_taste {
+        "Personalized picks shaped by your taste graph & active session"
+    } else {
+        "Fresh tracks, artist picks & curated mixes ready to play"
+    };
+
+    (kicker, title, sub)
 }
 
 pub(crate) fn text<'a>(

@@ -529,6 +529,8 @@ pub enum Message {
     },
     LoadMoreSearch,
     ApplySuggestion(String),
+    MoveHomeSectionUp(usize),
+    MoveHomeSectionDown(usize),
 
     // Playback & Queue
     PlayTrack(Track),
