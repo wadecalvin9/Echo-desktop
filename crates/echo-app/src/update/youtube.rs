@@ -334,6 +334,17 @@ impl EchoApp {
                 }
                 Task::none()
             }
+            Message::OpenShelfItems { title, items } => {
+                self.push_nav_history();
+                let tasks: Vec<_> = items
+                    .iter()
+                    .take(30)
+                    .map(|it| self.fetch_cover_if_needed(it.thumbnail_url()))
+                    .collect();
+                self.viewing_detail = Some(DetailPage::ArtistItems { title, items });
+                self.show_expanded = false;
+                Task::batch(tasks)
+            }
             Message::OpenArtistItems { browse_id, params } => {
                 self.push_nav_history();
                 self.detail_loading = Some("Items".to_string());

@@ -557,7 +557,14 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             button(text(if show_explore_link { "Explore all" } else { "Show all" }).size(12).font(bold()).color(muted))
                 .padding([5, 10])
                 .style(ghost_row_button_style(p, false))
-                .on_press(Message::SelectTab(NavTab::Explore)),
+                .on_press(if show_explore_link {
+                    Message::SelectTab(NavTab::Explore)
+                } else {
+                    Message::OpenShelfItems {
+                        title: title.to_string(),
+                        items: items.to_vec(),
+                    }
+                }),
         );
 
         let title_block = if let Some(sub) = sub_text {
@@ -961,11 +968,31 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         ]
         .spacing(16);
 
+        if !self.home_quick_tiles.is_empty() {
+            content = content.push(self.browse_shelf_section(
+                "explore:taste_picks".to_string(),
+                "Recommended for You",
+                &self.home_quick_tiles,
+                false,
+                None,
+            ));
+        }
+
+        if let Some(sec) = self.home_sections.first() {
+            content = content.push(self.browse_shelf_section(
+                format!("explore:home_seed:{}", sec.title),
+                &sec.title,
+                &sec.items,
+                false,
+                None,
+            ));
+        }
+
         if let Some(explore) = &self.explore_page {
             if !explore.new_release_albums.is_empty() {
                 content = content.push(self.browse_shelf_section(
                     "explore:new_releases".to_string(),
-                    "New Releases",
+                    "New Releases & Drops",
                     &explore.new_release_albums,
                     false,
                     None,
@@ -1383,17 +1410,71 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                 self.vscroll(col.push(vertical_space().height(24)))
             }
             DetailPage::ArtistItems { title, items, .. } => {
-                let mut list = column![
-                    container(text(title).size(26).font(bold()))
-                        .padding([22, 24])
-                        .width(Length::Fill)
-                        .style(hero_banner_style(p)),
-                ]
-                .spacing(6);
-                for (i, it) in items.iter().enumerate() {
-                    list = list.push(container(self.browse_item_row(i + 1, it)).padding([0, 16]));
+                let all_tracks: Vec<Track> = items.iter().filter_map(|it| match it {
+                    BrowseItem::Track(t) => Some(t.clone()),
+                    _ => None,
+                }).collect();
+                let is_all_tracks = all_tracks.len() == items.len() && !items.is_empty();
+
+                let hero = container(
+                    row![
+                        column![
+                            text("COLLECTION").size(11).font(bold()).color(color_from_rgb(p.primary)),
+                            text(title).size(30).font(bold()),
+                            text(format!("{} items", items.len())).size(13).color(muted),
+                        ]
+                        .spacing(3),
+                        horizontal_space(),
+                        if is_all_tracks {
+                            button(
+                                row![
+                                    icons::icon(icons::PLAY, 16.0, Color::BLACK),
+                                    text("Play All").size(13).font(bold()),
+                                ]
+                                .spacing(8)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([10, 22])
+                            .style(glowing_play_button_style(p))
+                            .on_press(Message::PlayTracks(all_tracks.clone(), 0))
+                        } else {
+                            button(horizontal_space().width(0)).style(ghost_row_button_style(p, false))
+                        }
+                    ]
+                    .align_y(Alignment::Center),
+                )
+                .padding([22, 24])
+                .width(Length::Fill)
+                .style(hero_banner_style(p));
+
+                let mut col = column![hero].spacing(16);
+
+                if is_all_tracks {
+                    col = col.push(self.table_header());
+                    let mut track_col = column![].spacing(0);
+                    for (idx, item) in items.iter().enumerate() {
+                        if let BrowseItem::Track(t) = item {
+                            track_col = track_col.push(self.table_track_row(idx + 1, t, Some((all_tracks.clone(), idx))));
+                        }
+                    }
+                    col = col.push(container(track_col).padding([0, 16]));
+                } else {
+                    let cw = self.center_width();
+                    let cols = (((cw - 48.0 + 16.0) / (172.0 + 16.0)).floor() as usize).clamp(2, 6);
+                    let mut grid_col = column![].spacing(16);
+                    for chunk in items.chunks(cols) {
+                        let mut r = row![].spacing(16);
+                        for it in chunk {
+                            r = r.push(self.browse_card(it));
+                        }
+                        for _ in chunk.len()..cols {
+                            r = r.push(horizontal_space().width(172));
+                        }
+                        grid_col = grid_col.push(r);
+                    }
+                    col = col.push(container(grid_col).padding([8, 24]));
                 }
-                self.vscroll(list.push(vertical_space().height(24)))
+                self.vscroll(col.push(vertical_space().height(32)))
             }
             DetailPage::Category {
                 title, sections, ..

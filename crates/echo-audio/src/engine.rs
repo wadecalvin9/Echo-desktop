@@ -64,6 +64,22 @@ enum Command {
     SetDevice(Option<String>),
 }
 
+struct PauseFade {
+    current_gain: f32,
+    target_gain: f32,
+    is_paused: bool,
+}
+
+impl PauseFade {
+    fn new() -> Self {
+        Self {
+            current_gain: 1.0,
+            target_gain: 1.0,
+            is_paused: false,
+        }
+    }
+}
+
 struct SharedState {
     status: Mutex<PlaybackStatus>,
     position_ms: AtomicU64,
@@ -81,6 +97,7 @@ struct SharedState {
     is_local: AtomicBool,
     finished_seq: AtomicU64,
     paused: AtomicBool,
+    pause_fade: Mutex<PauseFade>,
     out_rate: AtomicU64,
     out_channels: AtomicU64,
     spectrum_packed: AtomicU64,
@@ -107,11 +124,32 @@ impl SharedState {
             is_local: AtomicBool::new(false),
             finished_seq: AtomicU64::new(0),
             paused: AtomicBool::new(false),
+            pause_fade: Mutex::new(PauseFade::new()),
             out_rate: AtomicU64::new(48_000),
             out_channels: AtomicU64::new(2),
             spectrum_packed: AtomicU64::new(0),
             ring: Mutex::new(VecDeque::with_capacity(48_000 * 4)),
         }
+    }
+
+    fn trigger_pause(&self) {
+        let mut fade = self.pause_fade.lock().expect("pause_fade");
+        fade.target_gain = 0.0;
+    }
+
+    fn trigger_resume(&self) {
+        let mut fade = self.pause_fade.lock().expect("pause_fade");
+        fade.target_gain = 1.0;
+        fade.is_paused = false;
+        self.paused.store(false, Ordering::Relaxed);
+    }
+
+    fn reset_fade_for_new_track(&self) {
+        let mut fade = self.pause_fade.lock().expect("pause_fade");
+        fade.current_gain = 0.0;
+        fade.target_gain = 1.0;
+        fade.is_paused = false;
+        self.paused.store(false, Ordering::Relaxed);
     }
 
     fn total_gain(&self) -> f32 {
@@ -153,18 +191,26 @@ impl AudioEngine {
     }
 
     pub fn pause(&self) {
-        self.shared.paused.store(true, Ordering::Relaxed);
+        self.shared.trigger_pause();
         *self.shared.status.lock().expect("status") = PlaybackStatus::Paused;
         let _ = self.tx.send(Command::Pause);
     }
 
     pub fn resume(&self) {
-        self.shared.paused.store(false, Ordering::Relaxed);
+        self.shared.trigger_resume();
         *self.shared.status.lock().expect("status") = PlaybackStatus::Playing;
         let _ = self.tx.send(Command::Resume);
     }
 
     pub fn stop(&self) {
+        {
+            let mut fade = self.shared.pause_fade.lock().expect("pause_fade");
+            fade.current_gain = 0.0;
+            fade.target_gain = 0.0;
+            fade.is_paused = true;
+        }
+        self.shared.paused.store(true, Ordering::Relaxed);
+        *self.shared.status.lock().expect("status") = PlaybackStatus::Stopped;
         let _ = self.tx.send(Command::Stop);
     }
 
@@ -456,7 +502,7 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
                 Command::Play(spec) => {
                     shared.ring.lock().expect("ring").clear();
                     shared.position_ms.store(0, Ordering::Relaxed);
-                    shared.paused.store(false, Ordering::Relaxed);
+                    shared.reset_fade_for_new_track();
                     equalizer.reset();
                     spatial.reset();
                     *shared.status.lock().expect("status") = PlaybackStatus::Loading;
@@ -504,11 +550,11 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
                     }
                 }
                 Command::Pause => {
-                    shared.paused.store(true, Ordering::Relaxed);
+                    shared.trigger_pause();
                     *shared.status.lock().expect("status") = PlaybackStatus::Paused;
                 }
                 Command::Resume => {
-                    shared.paused.store(false, Ordering::Relaxed);
+                    shared.trigger_resume();
                     if active.is_some() {
                         *shared.status.lock().expect("status") = PlaybackStatus::Playing;
                     }
@@ -661,27 +707,71 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
 }
 
 fn fill_output_f32(shared: &SharedState, out: &mut [f32]) {
-    if shared.paused.load(Ordering::Relaxed) {
+    let channels = shared.out_channels.load(Ordering::Relaxed).max(1) as usize;
+    let rate = shared.out_rate.load(Ordering::Relaxed).max(8000) as f32;
+    // 80ms smooth micro-fade ramp: step per frame
+    let ramp_step = 1.0 / (rate * 0.080);
+
+    let (mut current_gain, target_gain, is_paused) = {
+        let fade = shared.pause_fade.lock().expect("pause_fade");
+        (fade.current_gain, fade.target_gain, fade.is_paused)
+    };
+
+    if is_paused && current_gain <= 1e-4 {
         out.fill(0.0);
         decay_spectrum(shared);
         return;
     }
-    let gain = shared.total_gain();
+
+    let base_gain = shared.total_gain();
     let mut non_zero = false;
+    let mut finished_pausing = false;
+
     {
         let mut ring = shared.ring.lock().expect("ring");
-        for sample in out.iter_mut() {
-            if let Some(s) = ring.pop_front() {
-                let v = apply_gain_and_soft_limit(s, gain);
-                *sample = v;
-                if v.abs() > 1e-5 {
-                    non_zero = true;
+        let mut sample_idx = 0;
+        while sample_idx < out.len() {
+            if target_gain < current_gain {
+                current_gain = (current_gain - ramp_step).max(target_gain);
+                if current_gain <= 1e-4 {
+                    current_gain = 0.0;
+                    finished_pausing = true;
                 }
-            } else {
-                *sample = 0.0;
+            } else if target_gain > current_gain {
+                current_gain = (current_gain + ramp_step).min(target_gain);
+            }
+
+            let effective_gain = base_gain * current_gain;
+
+            for _ in 0..channels {
+                if sample_idx >= out.len() {
+                    break;
+                }
+                if finished_pausing {
+                    out[sample_idx] = 0.0;
+                } else if let Some(s) = ring.pop_front() {
+                    let v = apply_gain_and_soft_limit(s, effective_gain);
+                    out[sample_idx] = v;
+                    if v.abs() > 1e-5 {
+                        non_zero = true;
+                    }
+                } else {
+                    out[sample_idx] = 0.0;
+                }
+                sample_idx += 1;
             }
         }
     }
+
+    {
+        let mut fade = shared.pause_fade.lock().expect("pause_fade");
+        fade.current_gain = current_gain;
+        if finished_pausing {
+            fade.is_paused = true;
+            shared.paused.store(true, Ordering::Relaxed);
+        }
+    }
+
     if non_zero {
         update_spectrum(shared, out);
     } else {

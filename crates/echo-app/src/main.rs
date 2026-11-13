@@ -553,6 +553,7 @@ impl EchoApp {
             | Message::OpenArtist { .. }
             | Message::ArtistLoaded(..)
             | Message::OpenArtistItems { .. }
+            | Message::OpenShelfItems { .. }
             | Message::ArtistItemsLoaded(..)
             | Message::SubscribeArtist { .. }
             | Message::SubscribeResult { .. }

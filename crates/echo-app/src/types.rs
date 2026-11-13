@@ -505,6 +505,10 @@ pub enum Message {
         browse_id: String,
         params: Option<String>,
     },
+    OpenShelfItems {
+        title: String,
+        items: Vec<BrowseItem>,
+    },
     ArtistItemsLoaded(Result<(String, Vec<BrowseItem>, Option<String>), String>),
     SubscribeArtist {
         channel_id: String,
