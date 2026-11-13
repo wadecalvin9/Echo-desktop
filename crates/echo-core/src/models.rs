@@ -378,3 +378,111 @@ pub struct PendingScrobble {
     pub started_at_secs: i64,
 }
 
+/// Upgrades Google / YouTube thumbnail URLs to their highest clean resolution.
+///
+/// YouTube Music API responses by default return 60x60 or 120x120 thumbnails (`=w120-h120-l90-rj`)
+/// designed for small web list rows. Google's image server automatically generates high-definition
+/// album artwork when requested with `=w800-h800-l90-rj` (or `=s800`).
+/// Similarly, YouTube video thumbnails often have `?sqp=...` downscaling parameters or use `default.jpg`.
+pub fn upgrade_thumbnail_url(url: &str) -> String {
+    let u = url.trim();
+    if u.is_empty() {
+        return String::new();
+    }
+
+    // Google User Content (lh3.googleusercontent.com, yt3.googleusercontent.com, *.ggpht.com)
+    if u.contains("googleusercontent.com") || u.contains("ggpht.com") {
+        let base = if let Some(idx) = u.find('?') {
+            &u[..idx]
+        } else {
+            u
+        };
+
+        if let Some(idx) = base.rfind("=w") {
+            let suffix = &base[idx + 2..];
+            if let Some(dash_idx) = suffix.find("-h") {
+                if let Ok(w) = suffix[..dash_idx].parse::<u32>() {
+                    if w < 800 {
+                        return format!("{}=w800-h800-l90-rj", &base[..idx]);
+                    }
+                }
+            }
+        } else if let Some(idx) = base.rfind("=s") {
+            let suffix = &base[idx + 2..];
+            let num_str: String = suffix.chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Ok(s) = num_str.parse::<u32>() {
+                if s < 800 {
+                    let rest = &suffix[num_str.len()..];
+                    return format!("{}=s800{}", &base[..idx], rest);
+                }
+            }
+        }
+        return base.to_string();
+    }
+
+    // YouTube static thumbnails (i.ytimg.com)
+    if u.contains("i.ytimg.com") {
+        let base = if let Some(idx) = u.find('?') {
+            &u[..idx]
+        } else {
+            u
+        };
+
+        if base.ends_with("/default.jpg") {
+            return base.replace("/default.jpg", "/hqdefault.jpg");
+        } else if base.ends_with("/mqdefault.jpg") {
+            return base.replace("/mqdefault.jpg", "/hqdefault.jpg");
+        }
+        return base.to_string();
+    }
+
+    u.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_upgrade_google_usercontent_thumbnails() {
+        assert_eq!(
+            upgrade_thumbnail_url("https://yt3.googleusercontent.com/test=w120-h120-l90-rj"),
+            "https://yt3.googleusercontent.com/test=w800-h800-l90-rj"
+        );
+        assert_eq!(
+            upgrade_thumbnail_url("https://lh3.googleusercontent.com/test=w60-h60-l90-rj"),
+            "https://lh3.googleusercontent.com/test=w800-h800-l90-rj"
+        );
+        assert_eq!(
+            upgrade_thumbnail_url("https://yt3.googleusercontent.com/test=s120-c-k-c0x00ffffff-no-rj"),
+            "https://yt3.googleusercontent.com/test=s800-c-k-c0x00ffffff-no-rj"
+        );
+        assert_eq!(
+            upgrade_thumbnail_url("https://yt3.ggpht.com/test=s88"),
+            "https://yt3.ggpht.com/test=s800"
+        );
+        // Already 800+ should remain untouched
+        assert_eq!(
+            upgrade_thumbnail_url("https://yt3.googleusercontent.com/test=w1024-h1024-l90-rj"),
+            "https://yt3.googleusercontent.com/test=w1024-h1024-l90-rj"
+        );
+    }
+
+    #[test]
+    fn test_upgrade_ytimg_thumbnails() {
+        assert_eq!(
+            upgrade_thumbnail_url("https://i.ytimg.com/vi/abc/hqdefault.jpg?sqp=-oaymwEWCJADEOEB&rs=AMzJ"),
+            "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+        );
+        assert_eq!(
+            upgrade_thumbnail_url("https://i.ytimg.com/vi/abc/default.jpg?sqp=xyz"),
+            "https://i.ytimg.com/vi/abc/hqdefault.jpg"
+        );
+        assert_eq!(
+            upgrade_thumbnail_url("https://i.ytimg.com/vi/abc/hq720.jpg?sqp=xyz"),
+            "https://i.ytimg.com/vi/abc/hq720.jpg"
+        );
+    }
+}
+
+

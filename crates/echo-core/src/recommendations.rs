@@ -487,11 +487,11 @@ pub fn build_recommendations(
             - 0.8 * sat
             + 0.5 * dorm
             + 0.3 * like_x
-            + 1.2 * x_seed
-            + 0.8 * x_art
-            - 0.3 * x_novel
+            + 1.35 * x_seed
+            + 0.45 * x_art
+            + 0.35 * x_novel
             - 1.0 * x_imp
-            + 0.3 * x_ctx
+            + 0.55 * x_ctx
             - 1.0 * x_over
             + 0.6 * x_fit
     };
@@ -606,6 +606,7 @@ pub fn build_recommendations(
     let take_from_pool = |pool: &[EngineCard],
                           count: usize,
                           offset: usize,
+                          max_per_artist: usize,
                           quick_picks: &mut Vec<EngineCard>,
                           taken_groups: &mut HashSet<String>,
                           per_artist: &mut HashMap<String, usize>,
@@ -630,7 +631,7 @@ pub fn build_recommendations(
                 continue;
             }
             let art = c.track.primary_artist().trim().to_lowercase();
-            if !art.is_empty() && *per_artist.get(&art).unwrap_or(&0) >= MAX_PER_ARTIST {
+            if !art.is_empty() && *per_artist.get(&art).unwrap_or(&0) >= max_per_artist {
                 continue;
             }
             if let Some(stitle) = &c.seed_title {
@@ -662,6 +663,7 @@ pub fn build_recommendations(
             pool,
             *want,
             rotation_cursor,
+            1,
             &mut quick_picks,
             &mut taken_groups,
             &mut per_artist,
@@ -669,7 +671,7 @@ pub fn build_recommendations(
         );
     }
 
-    // Backfill remaining slots from combined scored pool if any lane ran short.
+    // Backfill remaining slots from combined scored pool enforcing artist diversity first.
     for pool in [&related_pool, &again_pool, &artist_pool, &explore_pool] {
         if quick_picks.len() >= desired_picks {
             break;
@@ -678,11 +680,30 @@ pub fn build_recommendations(
             pool,
             desired_picks - quick_picks.len(),
             0,
+            1,
             &mut quick_picks,
             &mut taken_groups,
             &mut per_artist,
             &mut per_seed,
         );
+    }
+    // Final backfill relaxing artist cap if library has few distinct artists
+    if quick_picks.len() < desired_picks {
+        for pool in [&related_pool, &again_pool, &artist_pool, &explore_pool] {
+            if quick_picks.len() >= desired_picks {
+                break;
+            }
+            take_from_pool(
+                pool,
+                desired_picks - quick_picks.len(),
+                0,
+                MAX_PER_ARTIST,
+                &mut quick_picks,
+                &mut taken_groups,
+                &mut per_artist,
+                &mut per_seed,
+            );
+        }
     }
 
     let discover: Vec<Track> = if !explore_pool.is_empty() {

@@ -628,27 +628,47 @@ impl EchoApp {
                 rounded,
                 circle,
                 blurred,
+                tint,
                 bytes,
             } => {
                 self.loading_covers.remove(&url);
+                let upgraded = echo_core::upgrade_thumbnail_url(&url);
+                if let Some(t) = tint {
+                    self.cover_tints.insert(url.clone(), t);
+                    if upgraded != url {
+                        self.cover_tints.insert(upgraded.clone(), t);
+                    }
+                }
                 if let Some(r) = rounded {
-                    self.rounded_covers.insert(url.clone(), r);
+                    self.rounded_covers.insert(url.clone(), r.clone());
+                    if upgraded != url {
+                        self.rounded_covers.insert(upgraded.clone(), r);
+                    }
                 } else if let Some(ref raw) = bytes {
-                    self.rounded_covers
-                        .insert(url.clone(), iced::widget::image::Handle::from_bytes(raw.clone()));
+                    let h = iced::widget::image::Handle::from_bytes(raw.clone());
+                    self.rounded_covers.insert(url.clone(), h.clone());
+                    if upgraded != url {
+                        self.rounded_covers.insert(upgraded.clone(), h);
+                    }
                 }
                 if let Some(c) = circle {
-                    self.circle_covers.insert(url.clone(), c);
+                    self.circle_covers.insert(url.clone(), c.clone());
+                    if upgraded != url {
+                        self.circle_covers.insert(upgraded.clone(), c);
+                    }
                 }
                 if let Some(b) = blurred {
-                    self.blurred_covers.insert(url.clone(), b);
+                    self.blurred_covers.insert(url.clone(), b.clone());
+                    if upgraded != url {
+                        self.blurred_covers.insert(upgraded.clone(), b);
+                    }
                 }
                 if let Some(raw) = bytes {
                     let is_current_cover = self
                         .queue
                         .current()
                         .and_then(|c| c.track.thumbnail_url.as_deref())
-                        == Some(url.as_str());
+                        .is_some_and(|u| u == url.as_str() || u == upgraded.as_str());
                     if is_current_cover {
                         if let Some(p) =
                             DynamicPalette::from_image_bytes(&raw, self.settings.theme_mode)
@@ -656,7 +676,10 @@ impl EchoApp {
                             self.palette = p;
                         }
                     }
-                    self.cover_bytes.insert(url, raw);
+                    self.cover_bytes.insert(url.clone(), raw.clone());
+                    if upgraded != url {
+                        self.cover_bytes.insert(upgraded, raw);
+                    }
                 }
                 Task::none()
             }

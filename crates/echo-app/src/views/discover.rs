@@ -1,25 +1,26 @@
 use std::collections::HashSet;
 
 use iced::alignment::Alignment;
+use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_space, responsive, row, text, text_input,
+    button, column, container, horizontal_space, responsive, row, text_input,
     vertical_space,
 };
 use iced::{Color, Element, Length};
 
-use echo_core::{DynamicPalette, Track};
+use echo_core::Track;
 use echo_youtube::BrowseItem;
 
 use crate::icons;
 use crate::theme::{
-    artwork_frame_style, bare_input_style, color_from_rgb, divider_style, ghost_row_button_style,
-    glowing_play_button_style, hero_banner_style, hero_banner_tinted_style, icon_button_style,
-    outlined_pill_button_style, pager_button_style, search_field_style, skeleton_block_style,
-    soft_pill_button_style, sticky_header_style, tile_button_style, top_pill_button_style,
-    with_alpha,
+    artwork_frame_style, bare_input_style, bento_card_style, color_from_rgb, divider_style,
+    ghost_row_button_style, glowing_play_button_style, hero_banner_style, hero_banner_tinted_style,
+    icon_button_style, outlined_pill_button_style, pager_button_style, search_field_style,
+    skeleton_block_style, soft_pill_button_style, sticky_header_style, tile_button_style,
+    top_pill_button_style, with_alpha,
 };
 use crate::{
-    bold, ellipsize, greeting_kicker, greeting_label, semibold, DetailPage, EchoApp,
+    bold, ellipsize, greeting_label, semibold, text, DetailPage, EchoApp,
     LibraryTab, Message, NavTab,
 };
 
@@ -84,9 +85,12 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         .spacing(24)
         .align_y(Alignment::End);
         let page_tint = cover_url
-            .and_then(|u| self.cover_bytes.get(u))
-            .and_then(|b| DynamicPalette::from_image_bytes(b, self.settings.theme_mode))
-            .map(|pal| pal.tint)
+            .and_then(|u| {
+                self.cover_tints.get(u).copied().or_else(|| {
+                    let up = echo_core::upgrade_thumbnail_url(u);
+                    self.cover_tints.get(&up).copied()
+                })
+            })
             .unwrap_or(p.tint);
         let hero = container(hero_col)
             .padding([26, 24])
@@ -264,7 +268,7 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         );
         column![
             container(
-                row![cols, horizontal_space().width(132)]
+                row![cols, horizontal_space().width(96 + 12)]
                     .spacing(0)
                     .padding([8, 12])
                     .align_y(Alignment::Center),
@@ -522,6 +526,108 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         .into()
     }
 
+    fn hero_spotlight_card<'a>(
+        &'a self,
+        cover_url: Option<&'a str>,
+        title: String,
+        subtitle: String,
+        tracks: Vec<Track>,
+    ) -> Element<'a, Message> {
+        let p = self.palette;
+        let accent = color_from_rgb(p.primary);
+        let muted = color_from_rgb(p.text_muted);
+        let is_playing_any = self.queue.current().is_some_and(|c| {
+            tracks.iter().any(|t| t.id == c.track.id)
+        });
+
+        let cover_elem = container(self.artwork_widget(cover_url, 116.0, false))
+            .style(artwork_frame_style(10.0, 0.45))
+            .width(116)
+            .height(116);
+
+        let chip = row![
+            icons::icon(icons::COMPASS, 11.0, accent),
+            text("DAILY SPOTLIGHT")
+                .size(10.0)
+                .font(bold())
+                .color(accent),
+        ]
+        .spacing(5)
+        .align_y(Alignment::Center);
+
+        let track_count = tracks.len();
+        let play_btn = if !tracks.is_empty() {
+            button(
+                row![
+                    icons::icon(
+                        if is_playing_any { icons::EQ_BARS } else { icons::PLAY },
+                        11.5,
+                        Color::BLACK,
+                    ),
+                    text(if is_playing_any { "Listening Now" } else { "Play Mix" })
+                        .size(12.5)
+                        .font(bold()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([7, 16])
+            .style(glowing_play_button_style(p))
+            .on_press(Message::PlayTracks(tracks, 0))
+        } else {
+            button(
+                row![
+                    icons::icon(icons::REFRESH, 12.0, muted),
+                    text("Refresh").size(12.0).font(semibold()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([7, 14])
+            .style(soft_pill_button_style(p))
+            .on_press(Message::LoadHome)
+        };
+
+        let mut action_row = row![play_btn].spacing(10).align_y(Alignment::Center);
+        if track_count > 0 {
+            action_row = action_row.push(
+                text(format!("{} tracks", track_count))
+                    .size(11.5)
+                    .color(muted),
+            );
+        }
+
+        let content_col = column![
+            chip,
+            text(title)
+                .size(18.0)
+                .font(bold())
+                .wrapping(Wrapping::None),
+            text(subtitle)
+                .size(12.0)
+                .color(muted)
+                .wrapping(Wrapping::None),
+            vertical_space(),
+            action_row,
+        ]
+        .spacing(4)
+        .height(Length::Fill);
+
+        let inner_row = row![
+            cover_elem,
+            content_col,
+        ]
+        .spacing(16)
+        .align_y(Alignment::Center);
+
+        container(inner_row)
+            .padding(16)
+            .width(Length::Fill)
+            .height(Length::Fixed(148.0))
+            .style(bento_card_style(p))
+            .into()
+    }
+
     pub(crate) fn view_discover(&self) -> Element<'_, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
@@ -569,13 +675,13 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             }
         }
 
-        let kicker = greeting_kicker().to_string();
+        let kicker = "MADE FOR YOU".to_string();
         let subline = if self.listener_ctx.known {
             "Personalized picks shaped by your taste graph & active session".to_string()
         } else {
             "Fresh tracks, artists & mixes ready to play".to_string()
         };
-        let mut greeting_row = row![
+        let greeting_row = row![
             column![
                 text(kicker).size(11).font(bold()).color(accent),
                 text(greeting_label()).size(30).font(bold()),
@@ -597,45 +703,124 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         ]
         .spacing(12)
         .align_y(Alignment::End);
-        if !mix_tracks.is_empty() {
-            greeting_row = greeting_row.push(
-                button(
-                    row![
-                        icons::icon(icons::PLAY, 12.0, Color::BLACK),
-                        text("Play Mix").size(13).font(bold()),
-                    ]
-                    .spacing(7)
-                    .align_y(Alignment::Center),
-                )
-                .padding([9, 18])
-                .style(glowing_play_button_style(p))
-                .on_press(Message::PlayTracks(mix_tracks, 0)),
-            );
-        }
         header_col = header_col.push(greeting_row);
 
-        let cw = self.center_width();
-        let cols: usize = if cw >= 980.0 {
-            4
-        } else if cw >= 620.0 {
-            3
-        } else {
-            2
-        };
-        let tile_items: Vec<&BrowseItem> = self.home_quick_tiles.iter().take(cols * 2).collect();
-        let mut tiles = column![].spacing(12);
-        for chunk in tile_items.chunks(cols) {
-            let mut r = row![].spacing(12);
-            for it in chunk {
-                r = r.push(self.quick_tile(it));
+        let first_cover = self
+            .home_quick_tiles
+            .first()
+            .and_then(|i| i.thumbnail_url())
+            .or_else(|| {
+                self.home_sections
+                    .first()
+                    .and_then(|s| s.items.first())
+                    .and_then(|i| i.thumbnail_url())
+            });
+
+        let mut seen_featured = HashSet::new();
+        let mut featured_artists = Vec::new();
+        for t in &mix_tracks {
+            let a = t.primary_artist().trim();
+            let key = a.to_lowercase();
+            if !key.is_empty() && seen_featured.insert(key) {
+                featured_artists.push(a);
+                if featured_artists.len() >= 3 {
+                    break;
+                }
             }
-            for _ in chunk.len()..cols {
-                r = r.push(horizontal_space().width(Length::Fill));
-            }
-            tiles = tiles.push(r);
         }
 
-        header_col = header_col.push(tiles);
+        let hero_title = if featured_artists.len() >= 2 {
+            format!("{} & {} Mix", featured_artists[0], featured_artists[1])
+        } else if featured_artists.len() == 1 {
+            format!("{} Radio", featured_artists[0])
+        } else {
+            "Today's Heavy Rotation".to_string()
+        };
+
+        let hero_subtitle = if !featured_artists.is_empty() {
+            format!("Featuring {} & more", featured_artists.join(", "))
+        } else if self.listener_ctx.known {
+            "Personalized daily selection from your taste profile".to_string()
+        } else {
+            "A balanced rotation of songs & recommendations".to_string()
+        };
+
+        let hero_card = self.hero_spotlight_card(
+            first_cover,
+            hero_title,
+            hero_subtitle,
+            mix_tracks,
+        );
+
+        let cw = self.center_width();
+        if cw >= 840.0 {
+            let comp_cols = if cw >= 1200.0 { 3 } else { 2 };
+            let needed_tiles = comp_cols * 2 - 1;
+            let companion_items: Vec<&BrowseItem> =
+                self.home_quick_tiles.iter().take(needed_tiles).collect();
+
+            let mut right_col = column![].spacing(12);
+
+            // Row 1: Liked Songs + (comp_cols - 1) tiles
+            let mut r1 = row![self.liked_songs_quick_tile()].spacing(12);
+            for it in companion_items.iter().take(comp_cols - 1) {
+                r1 = r1.push(self.quick_tile(it));
+            }
+            for _ in (companion_items.len().min(comp_cols - 1) + 1)..comp_cols {
+                r1 = r1.push(horizontal_space().width(Length::Fill));
+            }
+            right_col = right_col.push(r1);
+
+            // Row 2: remaining tiles
+            let mut r2 = row![].spacing(12);
+            let row2_items = companion_items.iter().skip(comp_cols - 1).take(comp_cols);
+            let mut r2_count = 0;
+            for it in row2_items {
+                r2 = r2.push(self.quick_tile(it));
+                r2_count += 1;
+            }
+            for _ in r2_count..comp_cols {
+                r2 = r2.push(horizontal_space().width(Length::Fill));
+            }
+            right_col = right_col.push(r2);
+
+            let bento_row = row![
+                container(hero_card)
+                    .width(Length::FillPortion(if comp_cols == 3 { 2 } else { 3 })),
+                container(right_col)
+                    .width(Length::FillPortion(if comp_cols == 3 { 3 } else { 4 })),
+            ]
+            .spacing(12);
+
+            header_col = header_col.push(bento_row);
+        } else {
+            let mut stacked = column![hero_card].spacing(12);
+            let companion_items: Vec<&BrowseItem> =
+                self.home_quick_tiles.iter().take(3).collect();
+
+            // Row 1: Liked Songs + 1 tile
+            let mut r1 = row![self.liked_songs_quick_tile()].spacing(12);
+            if let Some(first_tile) = companion_items.first() {
+                r1 = r1.push(self.quick_tile(first_tile));
+            } else {
+                r1 = r1.push(horizontal_space().width(Length::Fill));
+            }
+            stacked = stacked.push(r1);
+
+            // Row 2: remaining tiles
+            let mut r2 = row![].spacing(12);
+            let mut r2_count = 0;
+            for it in companion_items.iter().skip(1).take(2) {
+                r2 = r2.push(self.quick_tile(it));
+                r2_count += 1;
+            }
+            for _ in r2_count..2 {
+                r2 = r2.push(horizontal_space().width(Length::Fill));
+            }
+            stacked = stacked.push(r2);
+
+            header_col = header_col.push(stacked);
+        }
 
         let header = container(header_col)
             .padding([20, 24])
@@ -841,9 +1026,12 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                 .join(" • ");
 
                 let page_tint = alb.thumbnail_url.as_deref()
-                    .and_then(|u| self.cover_bytes.get(u))
-                    .and_then(|b| DynamicPalette::from_image_bytes(b, self.settings.theme_mode))
-                    .map(|pal| pal.tint)
+                    .and_then(|u| {
+                        self.cover_tints.get(u).copied().or_else(|| {
+                            let up = echo_core::upgrade_thumbnail_url(u);
+                            self.cover_tints.get(&up).copied()
+                        })
+                    })
                     .unwrap_or(p.tint);
                 let mut col = column![
                     container(
@@ -1013,9 +1201,12 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                 .join(" • ");
 
                 let page_tint = page.thumbnail_url.as_deref()
-                    .and_then(|u| self.cover_bytes.get(u))
-                    .and_then(|b| DynamicPalette::from_image_bytes(b, self.settings.theme_mode))
-                    .map(|pal| pal.tint)
+                    .and_then(|u| {
+                        self.cover_tints.get(u).copied().or_else(|| {
+                            let up = echo_core::upgrade_thumbnail_url(u);
+                            self.cover_tints.get(&up).copied()
+                        })
+                    })
                     .unwrap_or(p.tint);
 
                 let mut col = column![
@@ -1036,9 +1227,9 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                                 .align_y(Alignment::Center),
                                 text(&page.name).size(52).font(bold()),
                                 if !stats_line.is_empty() {
-                                    text(stats_line).size(14).color(Color::WHITE)
+                                    Element::from(text(stats_line).size(14).color(Color::WHITE))
                                 } else {
-                                    text("").size(1)
+                                    Element::from(horizontal_space().width(0))
                                 },
                             ]
                             .spacing(6)
@@ -1095,23 +1286,18 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                         }
                         col = col.push(container(track_col).padding([8, 24]));
                     } else {
-                        let items = &sec.items;
-                        let shelf = responsive(move |size| {
-                            let n = (((size.width + 16.0) / (172.0 + 16.0)).floor() as usize)
-                                .clamp(1, 12);
-                            items
-                                .iter()
-                                .take(n)
-                                .fold(row![].spacing(16), |r, it| r.push(self.browse_card(it)))
-                                .into()
-                        });
+                        let cw = self.center_width();
+                        let n = (((cw - 48.0 + 16.0) / (172.0 + 16.0)).floor() as usize).clamp(1, 12);
+                        let shelf_row = sec
+                            .items
+                            .iter()
+                            .take(n)
+                            .fold(row![].spacing(16), |r, it| r.push(self.browse_card(it)));
                         col = col.push(
                             container(
                                 column![
                                     header_row,
-                                    container(shelf)
-                                        .width(Length::Fill)
-                                        .height(Length::Fixed(232.0)),
+                                    shelf_row,
                                 ]
                                 .spacing(12),
                             )

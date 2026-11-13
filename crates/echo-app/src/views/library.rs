@@ -1,7 +1,7 @@
 use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_space, pick_list, row, text, vertical_space,
+    button, column, container, horizontal_space, pick_list, row, vertical_space,
 };
 use iced::{Color, Element, Length};
 
@@ -15,7 +15,7 @@ use crate::theme::{
     tile_button_style, top_pill_button_style,
 };
 use crate::{
-    bold, semibold, EchoApp, LibraryTab, Message, SongsSortColumn,
+    bold, semibold, text, EchoApp, LibraryTab, Message, SongsSortColumn,
 };
 
 impl EchoApp {    pub(crate) fn view_library(&self) -> Element<'_, Message> {
@@ -394,35 +394,51 @@ impl EchoApp {    pub(crate) fn view_library(&self) -> Element<'_, Message> {
                             .align_x(iced::alignment::Horizontal::Center)
                     );
                 } else {
-                    let mut grid_col = column![].spacing(10);
-                    let mut cur_row = row![].spacing(10);
-                    let mut cur_row_len = 0;
-                    for (name, count, thumb) in artist_list {
-                        let search_query = name.clone();
-                        let tile = button(
-                            column![
-                                self.artwork_widget(thumb.as_deref(), 110.0, false),
-                                text(name).size(13).font(bold()).wrapping(Wrapping::None),
-                                text(format!("{} tracks", count)).size(11).color(color_from_rgb(self.palette.text_muted)),
-                            ]
-                            .spacing(6)
-                            .align_x(Alignment::Center),
-                        )
-                        .width(130)
-                        .padding(10)
-                        .style(tile_button_style(self.palette))
-                        .on_press(Message::SearchExact(search_query));
-
-                        cur_row = cur_row.push(tile);
-                        cur_row_len += 1;
-                        if cur_row_len == 5 {
-                            grid_col = grid_col.push(cur_row);
-                            cur_row = row![].spacing(10);
-                            cur_row_len = 0;
+                    let cw = self.center_width();
+                    let cols: usize = if cw >= 1200.0 {
+                        6
+                    } else if cw >= 980.0 {
+                        5
+                    } else if cw >= 740.0 {
+                        4
+                    } else if cw >= 520.0 {
+                        3
+                    } else {
+                        2
+                    };
+                    let mut grid_col = column![].spacing(12);
+                    for chunk in artist_list.chunks(cols) {
+                        let mut r = row![].spacing(12);
+                        for (name, count, thumb) in chunk.iter().cloned() {
+                            let search_query = name.clone();
+                            let tile = button(
+                                column![
+                                    self.artwork_widget(thumb.as_deref(), 110.0, true),
+                                    container(
+                                        text(name)
+                                            .size(13)
+                                            .font(bold())
+                                            .wrapping(Wrapping::None),
+                                    )
+                                    .width(Length::Fill)
+                                    .clip(true),
+                                    text(format!("{} tracks", count))
+                                        .size(11)
+                                        .color(color_from_rgb(self.palette.text_muted)),
+                                ]
+                                .spacing(6)
+                                .align_x(Alignment::Center),
+                            )
+                            .width(Length::Fill)
+                            .padding(12)
+                            .style(tile_button_style(self.palette))
+                            .on_press(Message::SearchExact(search_query));
+                            r = r.push(tile);
                         }
-                    }
-                    if cur_row_len > 0 {
-                        grid_col = grid_col.push(cur_row);
+                        for _ in chunk.len()..cols {
+                            r = r.push(horizontal_space().width(Length::Fill));
+                        }
+                        grid_col = grid_col.push(r);
                     }
                     col = col.push(container(grid_col).padding([0, 20]));
                 }
@@ -477,36 +493,58 @@ impl EchoApp {    pub(crate) fn view_library(&self) -> Element<'_, Message> {
                             .align_x(iced::alignment::Horizontal::Center)
                     );
                 } else {
-                    let mut grid_col = column![].spacing(10);
-                    let mut cur_row = row![].spacing(10);
-                    let mut cur_row_len = 0;
-                    for (title, artist, count, thumb, tracks) in album_list {
-                        let play_tracks = tracks.clone();
-                        let tile = button(
-                            column![
-                                self.artwork_widget(thumb.as_deref(), 120.0, false),
-                                text(title).size(13).font(bold()).wrapping(Wrapping::None),
-                                text(artist).size(11).color(color_from_rgb(self.palette.text_muted)).wrapping(Wrapping::None),
-                                text(format!("{} tracks", count)).size(10).color(color_from_rgb(self.palette.text_muted)),
-                            ]
-                            .spacing(4)
-                            .align_x(Alignment::Center),
-                        )
-                        .width(140)
-                        .padding(10)
-                        .style(tile_button_style(self.palette))
-                        .on_press(Message::PlayTracks(play_tracks, 0));
-
-                        cur_row = cur_row.push(tile);
-                        cur_row_len += 1;
-                        if cur_row_len == 5 {
-                            grid_col = grid_col.push(cur_row);
-                            cur_row = row![].spacing(10);
-                            cur_row_len = 0;
+                    let cw = self.center_width();
+                    let cols: usize = if cw >= 1200.0 {
+                        6
+                    } else if cw >= 980.0 {
+                        5
+                    } else if cw >= 740.0 {
+                        4
+                    } else if cw >= 520.0 {
+                        3
+                    } else {
+                        2
+                    };
+                    let mut grid_col = column![].spacing(12);
+                    for chunk in album_list.chunks(cols) {
+                        let mut r = row![].spacing(12);
+                        for (title, artist, count, thumb, tracks) in chunk.iter().cloned() {
+                            let tile = button(
+                                column![
+                                    self.artwork_widget(thumb.as_deref(), 120.0, false),
+                                    container(
+                                        text(title)
+                                            .size(13)
+                                            .font(bold())
+                                            .wrapping(Wrapping::None),
+                                    )
+                                    .width(Length::Fill)
+                                    .clip(true),
+                                    container(
+                                        text(artist)
+                                            .size(11)
+                                            .color(color_from_rgb(self.palette.text_muted))
+                                            .wrapping(Wrapping::None),
+                                    )
+                                    .width(Length::Fill)
+                                    .clip(true),
+                                    text(format!("{} tracks", count))
+                                        .size(10)
+                                        .color(color_from_rgb(self.palette.text_muted)),
+                                ]
+                                .spacing(4)
+                                .align_x(Alignment::Center),
+                            )
+                            .width(Length::Fill)
+                            .padding(10)
+                            .style(tile_button_style(self.palette))
+                            .on_press(Message::PlayTracks(tracks, 0));
+                            r = r.push(tile);
                         }
-                    }
-                    if cur_row_len > 0 {
-                        grid_col = grid_col.push(cur_row);
+                        for _ in chunk.len()..cols {
+                            r = r.push(horizontal_space().width(Length::Fill));
+                        }
+                        grid_col = grid_col.push(r);
                     }
                     col = col.push(container(grid_col).padding([0, 20]));
                 }
@@ -748,9 +786,9 @@ impl EchoApp {    pub(crate) fn view_library(&self) -> Element<'_, Message> {
                                 .size(14)
                                 .color(muted),
                             if let Some(isrc) = &rec.isrc {
-                                text(format!("ISRC: {isrc}")).size(11).color(muted)
+                                Element::from(text(format!("ISRC: {isrc}")).size(11).color(muted))
                             } else {
-                                text("").size(1)
+                                Element::from(horizontal_space().width(0))
                             }
                         ]
                         .spacing(3),

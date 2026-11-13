@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, text, text_input,
+    button, column, container, horizontal_space, mouse_area, row, scrollable, text_input,
     tooltip, vertical_space,
 };
 use iced::{Color, Element, Length};
@@ -20,7 +20,7 @@ use crate::theme::{
     top_pill_button_style, window_control_button_style, with_alpha,
 };
 use crate::{
-    bold, ellipsize, semibold, DetailPage, EchoApp, LibraryFilter, LibraryTab, Message,
+    bold, ellipsize, semibold, text, DetailPage, EchoApp, LibraryFilter, LibraryTab, Message,
     NavTab,
 };
 
@@ -247,17 +247,22 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
             fwd_btn
         });
 
-        if self.window_size.0 >= 900.0 {
+        if self.window_size.0 >= 1150.0 {
             nav_arrows = nav_arrows.push(
                 container(
-                    text(current_page_title)
-                        .size(13)
-                        .font(semibold())
-                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.78))
-                        .wrapping(Wrapping::None),
+                    row![
+                        text("•").size(12).color(with_alpha(muted, 0.6)),
+                        text(current_page_title)
+                            .size(13)
+                            .font(semibold())
+                            .color(Color::from_rgba(1.0, 1.0, 1.0, 0.78))
+                            .wrapping(Wrapping::None),
+                    ]
+                    .spacing(6)
+                    .align_y(Alignment::Center),
                 )
                 .clip(true)
-                .padding([0, 6]),
+                .padding([0, 4]),
             );
         }
 
@@ -474,69 +479,83 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
                 tooltip::Position::Right,
             ),
             vertical_space().height(4),
-            button(
-                container(icons::icon(icons::HEART_FILLED, 18.0, Color::WHITE))
-                    .width(42)
-                    .height(42)
-                    .align_x(iced::alignment::Horizontal::Center)
-                    .align_y(iced::alignment::Vertical::Center)
-                    .style(liked_gradient_badge_style()),
-            )
-            .padding(2)
-            .style(ghost_row_button_style(
-                p,
-                in_library && self.library_tab == LibraryTab::Liked,
-            ))
-            .on_press(Message::SelectLibraryTab(LibraryTab::Liked)),
-            button(
-                container(icons::icon(
-                    icons::DOWNLOAD,
-                    18.0,
-                    color_from_rgb(p.primary),
+            self.with_tooltip(
+                button(
+                    container(icons::icon(icons::HEART_FILLED, 18.0, Color::WHITE))
+                        .width(42)
+                        .height(42)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center)
+                        .style(liked_gradient_badge_style()),
+                )
+                .padding(2)
+                .style(ghost_row_button_style(
+                    p,
+                    in_library && self.library_tab == LibraryTab::Liked,
                 ))
-                .width(42)
-                .height(42)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center)
-                .style(downloads_badge_style()),
-            )
-            .padding(2)
-            .style(ghost_row_button_style(
-                p,
-                in_library && self.library_tab == LibraryTab::Downloads,
-            ))
-            .on_press(Message::SelectLibraryTab(LibraryTab::Downloads)),
-            button(
-                container(icons::icon(icons::FOLDER, 18.0, Color::WHITE))
+                .on_press(Message::SelectLibraryTab(LibraryTab::Liked)),
+                "Liked Songs",
+                tooltip::Position::Right,
+            ),
+            self.with_tooltip(
+                button(
+                    container(icons::icon(
+                        icons::DOWNLOAD,
+                        18.0,
+                        color_from_rgb(p.primary),
+                    ))
                     .width(42)
                     .height(42)
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center)
-                    .style(local_badge_style()),
-            )
-            .padding(2)
-            .style(ghost_row_button_style(
-                p,
-                in_library && self.library_tab == LibraryTab::Local,
-            ))
-            .on_press(Message::SelectLibraryTab(LibraryTab::Local)),
+                    .style(downloads_badge_style()),
+                )
+                .padding(2)
+                .style(ghost_row_button_style(
+                    p,
+                    in_library && self.library_tab == LibraryTab::Downloads,
+                ))
+                .on_press(Message::SelectLibraryTab(LibraryTab::Downloads)),
+                "Downloads",
+                tooltip::Position::Right,
+            ),
+            self.with_tooltip(
+                button(
+                    container(icons::icon(icons::FOLDER, 18.0, Color::WHITE))
+                        .width(42)
+                        .height(42)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center)
+                        .style(local_badge_style()),
+                )
+                .padding(2)
+                .style(ghost_row_button_style(
+                    p,
+                    in_library && self.library_tab == LibraryTab::Local,
+                ))
+                .on_press(Message::SelectLibraryTab(LibraryTab::Local)),
+                "Local Files",
+                tooltip::Position::Right,
+            ),
         ]
         .spacing(4)
         .align_x(Alignment::Center);
 
         for (idx, pl) in self.playlists.iter().enumerate() {
             let active = in_library && self.library_tab == LibraryTab::Playlist(idx);
-            col = col.push(
+            col = col.push(self.with_tooltip(
                 button(self.artwork_widget(pl.thumbnail_url.as_deref(), 42.0, false))
                     .padding(2)
                     .style(ghost_row_button_style(p, active))
                     .on_press(Message::SelectLibraryTab(LibraryTab::Playlist(idx))),
-            );
+                pl.name.as_str(),
+                tooltip::Position::Right,
+            ));
         }
 
         for pl in self.account_playlists.iter().take(6) {
             let active = self.active_playlist_id() == Some(pl.id.as_str());
-            col = col.push(
+            col = col.push(self.with_tooltip(
                 button(self.artwork_widget(pl.thumbnail_url.as_deref(), 42.0, false))
                     .padding(2)
                     .style(ghost_row_button_style(p, active))
@@ -544,7 +563,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
                         id: pl.id.clone(),
                         title: pl.title.clone(),
                     }),
-            );
+                pl.title.as_str(),
+                tooltip::Position::Right,
+            ));
         }
 
         container(self.vscroll(col))
@@ -620,7 +641,41 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         ]
         .align_y(Alignment::Center);
 
-        let mut list = column![].spacing(4);
+        let filter_pill = |filter: LibraryFilter, label: &'static str| -> Element<'_, Message> {
+            let active = self.library_filter == filter;
+            button(
+                text(label)
+                    .size(11.5)
+                    .font(if active { bold() } else { semibold() })
+                    .color(if active { Color::BLACK } else { Color::WHITE }),
+            )
+            .padding([4, 10])
+            .style(top_pill_button_style(p, active))
+            .on_press(Message::LibraryFilterSelected(filter))
+            .into()
+        };
+
+        let filter_pills = scrollable(
+            row![
+                filter_pill(LibraryFilter::Playlists, "Playlists"),
+                filter_pill(LibraryFilter::Songs, "Songs"),
+                filter_pill(LibraryFilter::Albums, "Albums"),
+                filter_pill(LibraryFilter::Artists, "Artists"),
+                filter_pill(LibraryFilter::Downloads, "Downloaded"),
+            ]
+            .spacing(5)
+            .align_y(Alignment::Center),
+        )
+        .direction(scrollable::Direction::Horizontal(
+            scrollable::Scrollbar::new()
+                .width(0)
+                .scroller_width(0)
+                .margin(0),
+        ))
+        .height(30)
+        .width(Length::Fill);
+
+        let mut list = column![].spacing(3);
 
         if self.show_new_playlist_input {
             list = list.push(
@@ -654,9 +709,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
 
         if show_songs {
             let songs_active = in_library && self.library_tab == LibraryTab::Songs;
-            let songs_badge = container(icons::icon(icons::DISC, 20.0, Color::WHITE))
-                .width(48)
-                .height(48)
+            let songs_badge = container(icons::icon(icons::DISC, 18.0, Color::WHITE))
+                .width(40)
+                .height(40)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(local_badge_style());
@@ -671,9 +726,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
 
         if show_artists {
             let artists_active = in_library && self.library_tab == LibraryTab::Artists;
-            let artists_badge = container(icons::icon(icons::USER, 20.0, Color::WHITE))
-                .width(48)
-                .height(48)
+            let artists_badge = container(icons::icon(icons::USER, 18.0, Color::WHITE))
+                .width(40)
+                .height(40)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(liked_gradient_badge_style());
@@ -688,9 +743,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
 
         if show_albums {
             let albums_active = in_library && self.library_tab == LibraryTab::Albums;
-            let albums_badge = container(icons::icon(icons::LIBRARY, 20.0, Color::WHITE))
-                .width(48)
-                .height(48)
+            let albums_badge = container(icons::icon(icons::LIBRARY, 18.0, Color::WHITE))
+                .width(40)
+                .height(40)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(downloads_badge_style());
@@ -705,9 +760,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
 
         if show_playlists {
             let liked_active = in_library && self.library_tab == LibraryTab::Liked;
-            let liked_badge = container(icons::icon(icons::HEART_FILLED, 20.0, Color::WHITE))
-                .width(48)
-                .height(48)
+            let liked_badge = container(icons::icon(icons::HEART_FILLED, 18.0, Color::WHITE))
+                .width(40)
+                .height(40)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(liked_gradient_badge_style());
@@ -723,9 +778,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         if show_downloads {
             let dl_active = in_library && self.library_tab == LibraryTab::Downloads;
             let dl_badge =
-                container(icons::icon(icons::DOWNLOAD, 20.0, color_from_rgb(p.primary)))
-                    .width(48)
-                    .height(48)
+                container(icons::icon(icons::DOWNLOAD, 18.0, color_from_rgb(p.primary)))
+                    .width(40)
+                    .height(40)
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center)
                     .style(downloads_badge_style());
@@ -740,9 +795,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
 
         if show_local {
             let local_active = in_library && self.library_tab == LibraryTab::Local;
-            let local_badge = container(icons::icon(icons::FOLDER, 20.0, Color::WHITE))
-                .width(48)
-                .height(48)
+            let local_badge = container(icons::icon(icons::FOLDER, 18.0, Color::WHITE))
+                .width(40)
+                .height(40)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(local_badge_style());
@@ -884,7 +939,9 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
             container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.08)),
             vertical_space().height(6),
             header,
-            vertical_space().height(6),
+            vertical_space().height(4),
+            filter_pills,
+            vertical_space().height(4),
             self.vscroll(list),
         ]
         .spacing(2);
@@ -905,7 +962,7 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         active: bool,
         msg: Message,
     ) -> Element<'a, Message> {
-        let icon = self.artwork_widget(thumb, 48.0, false);
+        let icon = self.artwork_widget(thumb, 40.0, false);
         self.sidebar_badge_item(title, subtitle, icon, active, msg)
     }
 
@@ -923,7 +980,7 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
                 icon,
                 column![
                     text(ellipsize(title, 26))
-                        .size(14)
+                        .size(13.5)
                         .font(bold())
                         .wrapping(Wrapping::None)
                         .color(if active {
@@ -932,18 +989,18 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
                             Color::WHITE
                         }),
                     text(ellipsize(&subtitle, 30))
-                        .size(12)
+                        .size(11.5)
                         .wrapping(Wrapping::None)
                         .color(color_from_rgb(p.text_muted)),
                 ]
-                .spacing(3)
+                .spacing(2)
                 .width(Length::Fill),
             ]
-            .spacing(12)
+            .spacing(10)
             .align_y(Alignment::Center),
         )
         .width(Length::Fill)
-        .padding([6, 8])
+        .padding([5, 6])
         .style(ghost_row_button_style(p, active))
         .on_press(msg)
         .into()

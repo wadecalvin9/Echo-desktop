@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -467,14 +467,18 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
         let mut quick = Vec::new();
         let mut seen_tiles = HashSet::new();
         let mut seen_tile_versions = HashSet::new();
+        let mut artist_counts: HashMap<String, usize> = HashMap::new();
         if self.home_active_chip.is_none() {
             for t in self.history_tracks.iter().chain(self.liked_tracks.iter()) {
+                let artist = t.primary_artist().trim().to_lowercase();
                 if !self.listener_ctx.is_disliked_artist(t.primary_artist())
                     && !is_preview_title(&t.title)
+                    && *artist_counts.get(&artist).unwrap_or(&0) < 1
                 {
                     let vk = base_version_key(&t.title, t.primary_artist());
                     let it = BrowseItem::Track(t.clone());
                     if seen_tile_versions.insert(vk) && seen_tiles.insert(it.stable_key()) {
+                        *artist_counts.entry(artist).or_insert(0) += 1;
                         quick.push(it);
                     }
                     if quick.len() >= 3 {
@@ -485,9 +489,21 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
         }
         for sec in &self.home_sections {
             for it in &sec.items {
+                let artist = match it {
+                    BrowseItem::Track(t) => t.primary_artist().trim().to_lowercase(),
+                    BrowseItem::Artist { name, .. } => name.trim().to_lowercase(),
+                    BrowseItem::Album { artist, .. } => artist.trim().to_lowercase(),
+                    BrowseItem::Playlist { author, .. } => author.trim().to_lowercase(),
+                };
+                if !artist.is_empty() && *artist_counts.get(&artist).unwrap_or(&0) >= 1 && quick.len() < 7 {
+                    continue;
+                }
                 let vk = item_version_key(it);
                 let ok_ver = vk.is_none_or(|k| seen_tile_versions.insert(k));
                 if ok_ver && seen_tiles.insert(it.stable_key()) {
+                    if !artist.is_empty() {
+                        *artist_counts.entry(artist).or_insert(0) += 1;
+                    }
                     quick.push(it.clone());
                 }
                 if quick.len() >= 8 {
@@ -496,6 +512,24 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
             }
             if quick.len() >= 8 {
                 break;
+            }
+        }
+        // Fallback pass: if still under 6 tiles, relax the artist cap to fill remaining slots
+        if quick.len() < 6 {
+            for sec in &self.home_sections {
+                for it in &sec.items {
+                    let vk = item_version_key(it);
+                    let ok_ver = vk.is_none_or(|k| seen_tile_versions.insert(k));
+                    if ok_ver && seen_tiles.insert(it.stable_key()) {
+                        quick.push(it.clone());
+                    }
+                    if quick.len() >= 8 {
+                        break;
+                    }
+                }
+                if quick.len() >= 8 {
+                    break;
+                }
             }
         }
         self.home_quick_tiles = quick;
@@ -549,39 +583,47 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
         }
         let url_owned = url.to_string();
         self.loading_covers.insert(url_owned.clone());
+        let fetch_url = echo_core::upgrade_thumbnail_url(&url_owned);
         let http = self.http.clone();
+        let theme_mode = self.settings.theme_mode;
         Task::perform(
             async move {
-                let bytes = if url_owned.starts_with("http://") || url_owned.starts_with("https://")
+                let bytes = if fetch_url.starts_with("http://") || fetch_url.starts_with("https://")
                 {
                     let _permit = sem.acquire().await.ok();
-                    match http.get(&url_owned).send().await {
+                    match http.get(&fetch_url).send().await {
                         Ok(r) if r.status().is_success() => r.bytes().await.ok().map(|b| b.to_vec()),
+                        _ if fetch_url != url_owned => match http.get(&url_owned).send().await {
+                            Ok(r) if r.status().is_success() => r.bytes().await.ok().map(|b| b.to_vec()),
+                            _ => None,
+                        },
                         _ => None,
                     }
                 } else {
                     tokio::fs::read(&url_owned).await.ok()
                 };
-                let (rounded, circle, blurred) = if let Some(ref raw) = bytes {
+                let (rounded, circle, blurred, tint) = if let Some(ref raw) = bytes {
                     let raw_clone = raw.clone();
                     tokio::task::spawn_blocking(move || {
-                        let r = rounded_image_handle(&raw_clone, 256, 14.0, false);
-                        let c = rounded_image_handle(&raw_clone, 160, 80.0, true);
+                        let r = rounded_image_handle(&raw_clone, 512, 28.0, false);
+                        let c = rounded_image_handle(&raw_clone, 320, 160.0, true);
                         let b = blurred_image_handle(&raw_clone);
-                        (r, c, b)
+                        let t = DynamicPalette::from_image_bytes(&raw_clone, theme_mode).map(|p| p.tint);
+                        (r, c, b, t)
                     })
                     .await
-                    .unwrap_or((None, None, None))
+                    .unwrap_or((None, None, None, None))
                 } else {
-                    (None, None, None)
+                    (None, None, None, None)
                 };
-                (url_owned, rounded, circle, blurred, bytes)
+                (url_owned, rounded, circle, blurred, tint, bytes)
             },
-            |(url, rounded, circle, blurred, bytes)| Message::ArtworkLoaded {
+            |(url, rounded, circle, blurred, tint, bytes)| Message::ArtworkLoaded {
                 url,
                 rounded,
                 circle,
                 blurred,
+                tint,
                 bytes,
             },
         )

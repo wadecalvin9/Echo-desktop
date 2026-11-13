@@ -1,7 +1,7 @@
 use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_space, mouse_area, row, scrollable, text,
+    button, column, container, horizontal_space, mouse_area, row, scrollable,
     tooltip, vertical_space,
 };
 use iced::{Color, Element, Font, Length};
@@ -17,7 +17,7 @@ use crate::theme::{
     top_pill_button_style, with_alpha,
 };
 use crate::{
-    bold, format_duration_hm, format_hour_12, semibold, EchoApp, Message, StatsRange,
+    bold, format_duration_hm, format_hour_12, semibold, text, EchoApp, Message, StatsRange,
 };
 
 impl EchoApp {    pub(crate) fn view_stats(&self) -> Element<'_, Message> {
@@ -349,7 +349,7 @@ impl EchoApp {    pub(crate) fn view_stats(&self) -> Element<'_, Message> {
                 .style(divider_style(0.08))
         };
 
-        container(
+        let metrics_layout: Element<'_, Message> = if self.center_width() < 780.0 {
             column![
                 row![
                     stat_metric(
@@ -363,7 +363,14 @@ impl EchoApp {    pub(crate) fn view_stats(&self) -> Element<'_, Message> {
                         s.total_plays.to_string(),
                         format!("{} unique tracks", s.unique_tracks),
                     ),
-                    vsep(),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+                container(horizontal_space())
+                    .width(Length::Fill)
+                    .height(1)
+                    .style(divider_style(0.06)),
+                row![
                     stat_metric(
                         "ACTIVE STREAK",
                         streak_text,
@@ -382,6 +389,47 @@ impl EchoApp {    pub(crate) fn view_stats(&self) -> Element<'_, Message> {
                 ]
                 .spacing(10)
                 .align_y(Alignment::Center),
+            ]
+            .spacing(10)
+            .into()
+        } else {
+            row![
+                stat_metric(
+                    "TIME PLAYED",
+                    format_duration_hm(s.total_played_secs),
+                    avg_per_day,
+                ),
+                vsep(),
+                stat_metric(
+                    "TOTAL PLAYS",
+                    s.total_plays.to_string(),
+                    format!("{} unique tracks", s.unique_tracks),
+                ),
+                vsep(),
+                stat_metric(
+                    "ACTIVE STREAK",
+                    streak_text,
+                    if s.active_days == 1 {
+                        "1 active day".to_string()
+                    } else {
+                        format!("{} active days", s.active_days)
+                    },
+                ),
+                vsep(),
+                stat_metric(
+                    "PEAK HOUR",
+                    peak_text,
+                    format!("{} artists • {} liked", s.unique_artists, self.liked_tracks.len()),
+                ),
+            ]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into()
+        };
+
+        container(
+            column![
+                metrics_layout,
                 container(horizontal_space())
                     .width(Length::Fill)
                     .height(1)

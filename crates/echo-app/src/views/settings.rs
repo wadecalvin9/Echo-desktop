@@ -4,7 +4,7 @@ use echo_core::{
 };
 use iced::alignment::Alignment;
 use iced::widget::{
-    button, column, container, horizontal_space, pick_list, row, scrollable, slider, text,
+    button, column, container, horizontal_space, pick_list, row, scrollable, slider,
     text_input, toggler, vertical_space,
 };
 use iced::{Color, Element, Font, Length};
@@ -19,7 +19,7 @@ use crate::theme::{
     toggler_style, top_pill_button_style,
 };
 use crate::{
-    bold, mono, semibold, EchoApp, FolderTarget, Message, OutputDeviceOption, SettingsSection,
+    bold, mono, semibold, text, EchoApp, FolderTarget, Message, OutputDeviceOption, SettingsSection,
     TransitionFadeOption, YoutubeLanguageOption, YoutubeRegionOption,
 };
 

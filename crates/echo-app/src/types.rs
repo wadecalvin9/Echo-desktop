@@ -567,6 +567,7 @@ pub enum Message {
         rounded: Option<image::Handle>,
         circle: Option<image::Handle>,
         blurred: Option<image::Handle>,
+        tint: Option<echo_core::RgbColor>,
         bytes: Option<Vec<u8>>,
     },
 

@@ -4,7 +4,7 @@ use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
     button, column, container, horizontal_space, image, mouse_area, row, slider, stack,
-    text, tooltip, vertical_space,
+    tooltip, vertical_space,
 };
 use iced::{Color, Element, Length};
 
@@ -21,7 +21,7 @@ use crate::theme::{
     up_next_card_button_style, window_control_button_style, with_alpha,
 };
 use crate::{
-    bold, ellipsize, format_ms, mono, semibold, EchoApp, Message, RightTab,
+    bold, ellipsize, format_ms, mono, semibold, text, EchoApp, Message, RightTab,
     SleepTimerState,
 };
 
@@ -375,6 +375,14 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
         let vol_fill = if boosted { accent } else { Color::WHITE };
         let vol_pct = (self.settings.volume * 100.0).round() as u32;
 
+        let track_info_w = if self.window_size.0 >= 1200.0 {
+            260.0
+        } else if self.window_size.0 >= 960.0 {
+            210.0
+        } else {
+            160.0
+        };
+
         let now_playing = if let Some(cur) = self.queue.current() {
             let t = cur.track.clone();
             row![
@@ -416,7 +424,7 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                     .on_press(Message::OpenTrackArtist(t)),
                 ]
                 .spacing(2)
-                .max_width(210),
+                .width(Length::Fixed(track_info_w)),
                 self.with_tooltip(
                     button(heart_icon)
                         .padding(7)
@@ -436,10 +444,9 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                     text(artist).size(12).wrapping(Wrapping::None).color(muted),
                 ]
                 .spacing(3)
-                .max_width(210)
-                .clip(true),
+                .width(Length::Fixed(track_info_w)),
             ]
-            .spacing(12)
+            .spacing(10)
             .align_y(Alignment::Center)
         };
 
@@ -536,7 +543,7 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
             let on = self.show_right_rail && self.right_tab == tab;
             self.with_tooltip(
                 button(icons::icon(icon, 18.0, if on { accent } else { muted }))
-                    .padding(8)
+                    .padding(7)
                     .style(icon_button_style(p, false))
                     .on_press(Message::ToggleRightTab(tab)),
                 tip,
@@ -562,14 +569,14 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                 .spacing(5)
                 .align_y(Alignment::Center),
             )
-            .padding([6, 10])
+            .padding([5, 9])
             .style(top_pill_button_style(p, false))
             .on_press(Message::CycleSleepTimer)
             .into()
         } else {
             self.with_tooltip(
                 button(icons::icon(icons::CLOCK, 18.0, muted))
-                    .padding(8)
+                    .padding(7)
                     .style(icon_button_style(p, sleep_active))
                     .on_press(Message::CycleSleepTimer),
                 "Sleep Timer",
@@ -582,12 +589,10 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
             sleep_btn,
             rail_toggle(icons::LYRICS, RightTab::Lyrics, "Synced Lyrics"),
             rail_toggle(icons::QUEUE, RightTab::Queue, "Play Queue"),
-            horizontal_space().width(2),
             container(horizontal_space())
                 .width(1)
                 .height(16)
-                .style(divider_style(0.08)),
-            horizontal_space().width(2),
+                .style(divider_style(0.12)),
             self.with_tooltip(
                 button(icons::icon(
                     if muted_audio {
@@ -613,20 +618,30 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
             slider(0.0..=4.0, self.settings.volume, Message::VolumeChanged)
                 .step(0.05_f32)
                 .style(slim_slider_style(vol_fill, accent))
-                .width(86),
+                .width(if boosted { 68 } else { 80 }),
         ]
-        .spacing(4)
+        .spacing(5)
         .align_y(Alignment::Center);
         if boosted {
             right = right.push(
-                button(text(format!("+{vol_pct}%")).size(11).font(mono()).color(accent))
-                    .padding([4, 8])
-                    .style(soft_pill_button_style(p))
-                    .on_press(Message::VolumeChanged(1.0)),
+                self.with_tooltip(
+                    button(text(format!("{vol_pct}%")).size(10).font(mono()).color(accent))
+                        .padding([3, 6])
+                        .style(soft_pill_button_style(p))
+                        .on_press(Message::VolumeChanged(1.0)),
+                    "Volume boosted. Click to reset to 100%",
+                    tooltip::Position::Top,
+                ),
             );
         }
 
         right = right
+            .push(
+                container(horizontal_space())
+                    .width(1)
+                    .height(16)
+                    .style(divider_style(0.12)),
+            )
             .push(self.with_tooltip(
                 button(icons::icon(icons::MINI_PLAYER, 16.0, muted))
                     .padding(7)
@@ -648,37 +663,36 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                 tooltip::Position::Top,
             ));
 
+        let left_slot_w = (track_info_w + 106.0).max(270.0);
+
         let dock_content = row![
-            container(now_playing).width(Length::Shrink),
+            container(now_playing)
+                .width(Length::Fixed(left_slot_w))
+                .align_y(iced::alignment::Vertical::Center),
             container(center)
                 .width(Length::Fill)
-                .align_x(iced::alignment::Horizontal::Center),
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
             container(right)
                 .width(Length::Shrink)
-                .align_x(iced::alignment::Horizontal::Right),
+                .align_x(iced::alignment::Horizontal::Right)
+                .align_y(iced::alignment::Vertical::Center),
         ]
         .spacing(16)
+        .height(Length::Fixed(56.0))
         .align_y(Alignment::Center);
 
-        container(
-            column![
-                container(horizontal_space())
-                    .width(Length::Fill)
-                    .height(1)
-                    .style(divider_style(0.06)),
-                container(dock_content)
-                    .padding(iced::Padding {
-                        top: 8.0,
-                        right: 18.0,
-                        bottom: 10.0,
-                        left: 18.0,
-                    })
-                    .width(Length::Fill),
-            ]
-        )
-        .width(Length::Fill)
-        .style(player_dock_style(p))
-        .into()
+        container(dock_content)
+            .padding(iced::Padding {
+                top: 10.0,
+                right: 18.0,
+                bottom: 10.0,
+                left: 18.0,
+            })
+            .width(Length::Fill)
+            .height(Length::Fixed(76.0))
+            .style(player_dock_style(p))
+            .into()
     }
 
 

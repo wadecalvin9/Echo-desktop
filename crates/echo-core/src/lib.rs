@@ -35,9 +35,9 @@ pub use local_media::{
     scan_local_folders, tag_audio_file, LocalMediaScanConfig,
 };
 pub use models::{
-    AlbumRef, AlbumStats, ArtistRef, ArtistStats, AudioQuality, DailyListening, ListeningSummary,
-    PendingScrobble, Playlist, QueueItem, QueueState, RecognitionEntry, RepeatMode, Track,
-    TrackStats,
+    upgrade_thumbnail_url, AlbumRef, AlbumStats, ArtistRef, ArtistStats, AudioQuality,
+    DailyListening, ListeningSummary, PendingScrobble, Playlist, QueueItem, QueueState,
+    RecognitionEntry, RepeatMode, Track, TrackStats,
 };
 pub use settings::{
     AppSettings, AutoEqProfile, EqPreset, RecognitionSource, ScannerSensitivity, SettingsError, SpatialMode,

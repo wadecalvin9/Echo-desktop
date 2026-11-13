@@ -2,7 +2,7 @@ use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
     scrollable,
-    button, column, container, horizontal_space, image, mouse_area, row, stack, text,
+    button, column, container, horizontal_space, image, mouse_area, row, stack,
     tooltip,
 };
 use iced::{Color, Element, Font, Length};
@@ -15,11 +15,11 @@ use crate::icons;
 use crate::theme::{
     scroll_style,
     card_button_style, card_hover_scrim_style, card_play_fab_style, color_from_rgb,
-    ghost_row_button_style, icon_button_style, local_badge_style, quick_tile_button_style,
-    quick_tile_play_badge_style, tooltip_style, with_alpha,
+    ghost_row_button_style, icon_button_style, liked_gradient_badge_style, local_badge_style,
+    quick_tile_button_style, quick_tile_play_badge_style, tooltip_style, with_alpha,
 };
 use crate::{
-    bold, ellipsize, mono, semibold, EchoApp, LibraryTab, Message, NavTab,
+    bold, ellipsize, mono, semibold, text, EchoApp, LibraryTab, Message, NavTab,
 };
 
 impl EchoApp {    pub(crate) fn artwork_widget(&self, url: Option<&str>, size: f32, circle: bool) -> Element<'_, Message> {
@@ -172,6 +172,96 @@ impl EchoApp {    pub(crate) fn artwork_widget(&self, url: Option<&str>, size: f
             .padding(0)
             .style(quick_tile_button_style(p, is_playing))
             .on_press(Self::item_action(item));
+
+        mouse_area(btn)
+            .on_enter(Message::CardHovered(Some(key)))
+            .on_exit(Message::CardHovered(None))
+            .into()
+    }
+
+    /// Dedicated Liked Songs quick tile for the Home greeting bento section.
+    pub(crate) fn liked_songs_quick_tile(&self) -> Element<'_, Message> {
+        let p = self.palette;
+        let muted = color_from_rgb(p.text_muted);
+        let key = "tile:liked_songs".to_string();
+        let hovered = self.hovered_card.as_deref() == Some(key.as_str());
+        let count = self.liked_tracks.len();
+        let count_str = if count == 1 {
+            "1 liked song".to_string()
+        } else if count > 0 {
+            format!("{count} liked songs")
+        } else {
+            "Your collection".to_string()
+        };
+
+        let badge_active = hovered;
+        let badge_fg = if badge_active {
+            Color::BLACK
+        } else {
+            with_alpha(Color::WHITE, 0.72)
+        };
+
+        let heart_art = container(
+            container(icons::icon(icons::HEART_FILLED, 22.0, Color::WHITE))
+                .width(52)
+                .height(52)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .style(liked_gradient_badge_style()),
+        )
+        .padding(iced::Padding {
+            top: 8.0,
+            right: 0.0,
+            bottom: 8.0,
+            left: 8.0,
+        });
+
+        let tile_row = row![
+            heart_art,
+            container(
+                column![
+                    text("Liked Songs")
+                        .size(13.5)
+                        .font(bold())
+                        .color(color_from_rgb(p.text))
+                        .wrapping(Wrapping::None),
+                    text(count_str)
+                        .size(11.5)
+                        .color(muted)
+                        .wrapping(Wrapping::None),
+                ]
+                .spacing(2),
+            )
+            .width(Length::Fill)
+            .padding([0, 8]),
+            container(
+                container(icons::icon(
+                    icons::PLAY,
+                    11.5,
+                    badge_fg,
+                ))
+                .width(30)
+                .height(30)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center)
+                .style(quick_tile_play_badge_style(p, badge_active)),
+            )
+            .padding(iced::Padding {
+                top: 0.0,
+                right: 12.0,
+                bottom: 0.0,
+                left: 2.0,
+            }),
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center);
+
+        let btn = button(tile_row)
+            .width(Length::Fill)
+            .height(Length::Fixed(68.0))
+            .padding(0)
+            .style(quick_tile_button_style(p, false))
+            .on_press(Message::SelectLibraryTab(LibraryTab::Liked));
 
         mouse_area(btn)
             .on_enter(Message::CardHovered(Some(key)))
@@ -571,14 +661,22 @@ impl EchoApp {    pub(crate) fn artwork_widget(&self, url: Option<&str>, size: f
         }
 
         let actions_slot = container(actions)
-            .width(Length::Fixed(132.0))
+            .width(Length::Fixed(96.0))
             .align_x(iced::alignment::Horizontal::Right)
             .align_y(iced::alignment::Vertical::Center);
 
         mouse_area(
-            row![main_btn, actions_slot]
-                .spacing(0)
-                .align_y(Alignment::Center),
+            row![
+                main_btn,
+                container(actions_slot).padding(iced::Padding {
+                    top: 0.0,
+                    right: 12.0,
+                    bottom: 0.0,
+                    left: 0.0,
+                })
+            ]
+            .spacing(0)
+            .align_y(Alignment::Center),
         )
         .on_enter(Message::RowHovered(Some(row_key)))
         .on_exit(Message::RowHovered(None))

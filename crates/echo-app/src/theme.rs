@@ -567,14 +567,23 @@ pub fn hero_banner_tinted_style(tint: RgbColor, surface: RgbColor) -> impl Fn(&T
     }
 }
 
-/// The player dock blends seamlessly into the app backdrop with subtle depth.
+/// The player dock blends seamlessly into the app backdrop with soft atmospheric top highlight & elevation shadow.
 pub fn player_dock_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
-        let base = color_from_rgb(p.surface.lerp(p.background, 0.42));
+        let highlight = color_from_rgb(p.surface_elevated.lerp(p.tint, 0.16));
+        let base = color_from_rgb(p.surface.lerp(p.background, 0.46));
+        let grad = Linear::new(Radians(std::f32::consts::FRAC_PI_2))
+            .add_stop(0.0, with_alpha(highlight, 0.35))
+            .add_stop(0.05, base)
+            .add_stop(1.0, base);
         container::Style {
-            background: Some(Background::Color(base)),
+            background: Some(Background::Gradient(Gradient::Linear(grad))),
             text_color: Some(color_from_rgb(p.text)),
-            border: Border::default(),
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.50),
+                offset: Vector::new(0.0, -8.0),
+                blur_radius: 20.0,
+            },
             ..Default::default()
         }
     }

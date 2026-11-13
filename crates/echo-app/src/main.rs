@@ -19,7 +19,7 @@ use echo_audio::{available_output_devices, AudioEngine, PlaybackStatus};
 use echo_core::{
     AppSettings, CastDevice,
     DynamicPalette, EchoDb, ListenerContext, ListeningSummary,
-    Playlist, QueueState, RecognitionEntry, Track, TrackStats,
+    Playlist, QueueState, RecognitionEntry, RgbColor, Track, TrackStats,
 };
 use echo_fingerprint::{Recognised, ShazamClient};
 use echo_lyrics::{LyricsFetcher, LyricsResult};
@@ -31,7 +31,7 @@ use chrono::Timelike;
 use iced::keyboard::{self};
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_space, image, mouse_area, row, scrollable, stack, text,
+    button, column, container, horizontal_space, image, mouse_area, row, scrollable, stack,
     text_input, vertical_space,
 };
 use iced::{Alignment, Color, Element, Font, Length, Subscription, Task, Theme};
@@ -174,6 +174,7 @@ pub(crate) struct EchoApp {
     circle_covers: HashMap<String, image::Handle>,
     blurred_covers: HashMap<String, image::Handle>,
     cover_bytes: HashMap<String, Vec<u8>>,
+    cover_tints: HashMap<String, RgbColor>,
     loading_covers: HashSet<String>,
     shelf_offsets: HashMap<String, usize>,
     track_menu: Option<Track>,
@@ -355,6 +356,7 @@ impl EchoApp {
             circle_covers: HashMap::new(),
             blurred_covers: HashMap::new(),
             cover_bytes: HashMap::new(),
+            cover_tints: HashMap::new(),
             loading_covers: HashSet::new(),
             shelf_offsets: HashMap::new(),
             track_menu: None,
@@ -599,9 +601,9 @@ impl EchoApp {
 
     fn right_rail_width(&self) -> f32 {
         if self.window_size.0 < 1200.0 {
-            254.0
+            280.0
         } else {
-            290.0
+            320.0
         }
     }
 
@@ -618,7 +620,8 @@ impl EchoApp {
     }
 
     fn search_width(&self) -> f32 {
-        (self.window_size.0 * 0.34).clamp(240.0, 460.0)
+        let max_w = if self.window_size.0 >= 1400.0 { 440.0 } else { 380.0 };
+        (self.window_size.0 * 0.28).clamp(220.0, max_w)
     }
 
     fn show_album_column(&self) -> bool {
@@ -937,6 +940,7 @@ pub(crate) fn greeting_label() -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 pub(crate) fn greeting_kicker() -> &'static str {
     match chrono::Local::now().hour() {
         5..=11 => "MORNING ROTATION",
@@ -944,6 +948,12 @@ pub(crate) fn greeting_kicker() -> &'static str {
         17..=21 => "EVENING SESSION",
         _ => "AFTER HOURS",
     }
+}
+
+pub(crate) fn text<'a>(
+    content: impl iced::widget::text::IntoFragment<'a>,
+) -> iced::widget::Text<'a, Theme, iced::Renderer> {
+    iced::widget::text(content).shaping(iced::widget::text::Shaping::Advanced)
 }
 
 pub(crate) fn bold() -> Font {

@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
-    button, column, container, horizontal_space, rich_text, row, scrollable, span, text,
-    vertical_space,
+    button, column, container, horizontal_space, rich_text, row, scrollable, span,
+    tooltip, vertical_space,
 };
 use iced::{Color, Element, Font, Length};
 
@@ -18,7 +18,7 @@ use crate::theme::{
     with_alpha,
 };
 use crate::{
-    bold, ellipsize, mono, semibold, EchoApp, Message, RightTab,
+    bold, ellipsize, mono, semibold, text, EchoApp, Message, RightTab,
 };
 
 impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
@@ -35,25 +35,29 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
         };
 
         let header = row![
-            text(match self.right_tab {
-                RightTab::Now => self
-                    .queue
-                    .current()
-                    .and_then(|c| c.track.album.as_ref().map(|a| a.title.as_str()))
-                    .unwrap_or("Now Playing"),
-                RightTab::Queue => "Queue",
-                RightTab::Lyrics => "Lyrics",
-                RightTab::Top => "Top Picks",
-            })
-            .size(15)
-            .font(bold())
-            .wrapping(Wrapping::None),
-            horizontal_space(),
+            container(
+                text(match self.right_tab {
+                    RightTab::Now => self
+                        .queue
+                        .current()
+                        .and_then(|c| c.track.album.as_ref().map(|a| a.title.as_str()))
+                        .unwrap_or("Now Playing"),
+                    RightTab::Queue => "Queue",
+                    RightTab::Lyrics => "Lyrics",
+                    RightTab::Top => "Top Picks",
+                })
+                .size(15)
+                .font(bold())
+                .wrapping(Wrapping::None),
+            )
+            .width(Length::Fill)
+            .clip(true),
             button(icons::icon(icons::CLOSE, 16.0, muted))
                 .padding(6)
                 .style(icon_button_style(p, false))
                 .on_press(Message::ToggleRightSidebar),
         ]
+        .spacing(8)
         .align_y(Alignment::Center);
 
         let tabs = row![
@@ -486,7 +490,6 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
 
                         for (idx, item) in &context_items {
                             let idx = *idx;
-                            let is_last = idx + 1 >= total_items;
                             ctx_col = ctx_col.push(
                                 row![
                                     button(
@@ -497,14 +500,22 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                                                 false,
                                             ),
                                             column![
-                                                text(ellipsize(&item.track.title, 20))
-                                                    .size(12)
-                                                    .font(semibold())
-                                                    .wrapping(Wrapping::None),
-                                                text(ellipsize(&item.track.artist_display(), 22))
-                                                    .size(11)
-                                                    .color(muted)
-                                                    .wrapping(Wrapping::None),
+                                                container(
+                                                    text(ellipsize(&item.track.title, 26))
+                                                        .size(12)
+                                                        .font(semibold())
+                                                        .wrapping(Wrapping::None),
+                                                )
+                                                .width(Length::Fill)
+                                                .clip(true),
+                                                container(
+                                                    text(ellipsize(&item.track.artist_display(), 28))
+                                                        .size(11)
+                                                        .color(muted)
+                                                        .wrapping(Wrapping::None),
+                                                )
+                                                .width(Length::Fill)
+                                                .clip(true),
                                             ]
                                             .spacing(2)
                                             .width(Length::Fill),
@@ -516,16 +527,8 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                                     .padding([4, 6])
                                     .style(ghost_row_button_style(p, false))
                                     .on_press(Message::QueueJump(idx)),
-                                    button(icons::icon(icons::CHEVRON_UP, 13.0, muted))
-                                        .padding([4, 4])
-                                        .style(icon_button_style(p, false))
-                                        .on_press(Message::QueueMoveUp(idx)),
-                                    button(icons::icon(icons::CHEVRON_DOWN, 13.0, if is_last { with_alpha(muted, 0.4) } else { muted }))
-                                        .padding([4, 4])
-                                        .style(icon_button_style(p, false))
-                                        .on_press(Message::QueueMoveDown(idx)),
-                                    button(icons::icon(icons::CLOSE, 12.0, muted))
-                                        .padding([4, 4])
+                                    button(icons::icon(icons::CLOSE, 12.0, with_alpha(muted, 0.75)))
+                                        .padding([4, 5])
                                         .style(icon_button_style(p, false))
                                         .on_press(Message::QueueRemove(idx)),
                                 ]
@@ -717,22 +720,49 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
             return self.view_lyrics_fallback_visualizer(is_cinema, base_size);
         };
 
-        let rom_btn = button(text("Romanize").size(11).wrapping(Wrapping::None))
-            .padding([3, 10])
-            .style(top_pill_button_style(p, self.settings.romanize_lyrics))
-            .on_press(Message::ToggleRomanizeLyrics);
+        let has_cjk = res.synced.iter().any(|l| contains_cjk_or_hangul_or_kana(&l.text))
+            || res.plain.as_deref().map(contains_cjk_or_hangul_or_kana).unwrap_or(false);
 
-        let share_btn = button(
+        let rom_btn: Option<Element<'_, Message>> = if has_cjk || self.settings.romanize_lyrics {
+            Some(
+                self.with_tooltip(
+                    button(
+                        text(if is_cinema { "Romanize" } else { "Rom" })
+                            .size(11)
+                            .font(if self.settings.romanize_lyrics { bold() } else { semibold() })
+                            .wrapping(Wrapping::None),
+                    )
+                    .padding([3, if is_cinema { 10 } else { 8 }])
+                    .style(top_pill_button_style(p, self.settings.romanize_lyrics))
+                    .on_press(Message::ToggleRomanizeLyrics),
+                    "Romanize non-Latin lyrics (pinyin/romaji)",
+                    tooltip::Position::Top,
+                ),
+            )
+        } else {
+            None
+        };
+
+        let share_content: Element<'_, Message> = if is_cinema {
             row![
                 icons::icon(icons::SHARE, 12.0, muted),
                 text("Card").size(11).wrapping(Wrapping::None).color(muted),
             ]
             .spacing(4)
-            .align_y(Alignment::Center),
-        )
-        .padding([3, 8])
-        .style(top_pill_button_style(p, false))
-        .on_press(Message::ShareLyricsCard);
+            .align_y(Alignment::Center)
+            .into()
+        } else {
+            icons::icon(icons::SHARE, 12.0, muted).into()
+        };
+
+        let share_btn = self.with_tooltip(
+            button(share_content)
+                .padding([3, if is_cinema { 8 } else { 6 }])
+                .style(top_pill_button_style(p, false))
+                .on_press(Message::ShareLyricsCard),
+            "Share lyrics card",
+            tooltip::Position::Top,
+        );
 
         let offset_sec = self.settings.lyrics_offset_ms as f32 / 1000.0;
         let sync_stepper = row![
@@ -740,10 +770,18 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                 .padding([3, 6])
                 .style(top_pill_button_style(p, false))
                 .on_press(Message::AdjustLyricsOffset(-500)),
-            button(text(if self.settings.lyrics_offset_ms == 0 { "Sync: 0.0s".to_string() } else { format!("Sync: {:+.1}s", offset_sec) }).size(10).wrapping(Wrapping::None))
-                .padding([3, 6])
-                .style(top_pill_button_style(p, self.settings.lyrics_offset_ms != 0))
-                .on_press(Message::ResetLyricsOffset),
+            button(
+                text(if self.settings.lyrics_offset_ms == 0 {
+                    "Sync: 0.0s".to_string()
+                } else {
+                    format!("Sync: {:+.1}s", offset_sec)
+                })
+                .size(10)
+                .wrapping(Wrapping::None),
+            )
+            .padding([3, 6])
+            .style(top_pill_button_style(p, self.settings.lyrics_offset_ms != 0))
+            .on_press(Message::ResetLyricsOffset),
             button(text("+0.5s").size(10).wrapping(Wrapping::None))
                 .padding([3, 6])
                 .style(top_pill_button_style(p, false))
@@ -857,37 +895,61 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
 
             lines_col = lines_col.push(vertical_space().height(bottom_pad));
 
-            let controls = row![sync_stepper, share_btn, rom_btn]
-                .spacing(4)
+            let header_bar: Element<'_, Message> = if is_cinema {
+                let mut controls = row![sync_stepper, share_btn].spacing(6).align_y(Alignment::Center);
+                if let Some(rb) = rom_btn {
+                    controls = controls.push(rb);
+                }
+                row![
+                    text(format!("Synced Lyrics • {}", res.source.label()))
+                        .size(12)
+                        .wrapping(Wrapping::None)
+                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.65)),
+                    horizontal_space(),
+                    controls,
+                ]
+                .spacing(10)
+                .width(Length::Fill)
+                .align_y(Alignment::Center)
+                .into()
+            } else {
+                let mut top_actions = row![share_btn].spacing(4).align_y(Alignment::Center);
+                if let Some(rb) = rom_btn {
+                    top_actions = top_actions.push(rb);
+                }
+                let top_row = row![
+                    container(
+                        text(format!("Synced Lyrics • {}", res.source.label()))
+                            .size(11)
+                            .font(semibold())
+                            .wrapping(Wrapping::None)
+                            .color(muted),
+                    )
+                    .width(Length::Fill)
+                    .clip(true),
+                    top_actions,
+                ]
+                .spacing(6)
+                .width(Length::Fill)
                 .align_y(Alignment::Center);
 
-            let header_bar = row![
-                text(format!("Synced Lyrics • {}", res.source.label()))
-                    .size(11)
-                    .wrapping(Wrapping::None)
-                    .color(if is_cinema {
-                        Color::from_rgba(1.0, 1.0, 1.0, 0.65)
-                    } else {
-                        muted
-                    }),
-                horizontal_space(),
-                controls,
-            ]
-            .spacing(6)
-            .align_y(Alignment::Center);
+                let sync_row = row![
+                    text("Sync timing").size(11).color(muted),
+                    horizontal_space(),
+                    sync_stepper,
+                ]
+                .spacing(4)
+                .width(Length::Fill)
+                .align_y(Alignment::Center);
 
-            let header_widget: Element<'_, Message> = if is_cinema {
-                scrollable(header_bar)
-                    .direction(scrollable::Direction::Horizontal(
-                        scrollable::Scrollbar::new().width(0).scroller_width(0).margin(0),
-                    ))
+                column![top_row, sync_row]
+                    .spacing(6)
+                    .width(Length::Fill)
                     .into()
-            } else {
-                header_bar.into()
             };
 
             column![
-                header_widget,
+                header_bar,
                 scrollable(lines_col)
                     .id(self.lyrics_scroll_id.clone())
                     .direction(scrollable::Direction::Vertical(
@@ -906,15 +968,23 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
             } else {
                 plain.clone()
             };
+            let mut plain_actions = row![].spacing(4).align_y(Alignment::Center);
+            if let Some(rb) = rom_btn {
+                plain_actions = plain_actions.push(rb);
+            }
             let plain_header = row![
-                text(format!("Lyrics • {}", res.source.label()))
-                    .size(11)
-                    .wrapping(Wrapping::None)
-                    .color(muted),
-                horizontal_space(),
-                rom_btn,
+                container(
+                    text(format!("Lyrics • {}", res.source.label()))
+                        .size(11)
+                        .wrapping(Wrapping::None)
+                        .color(muted),
+                )
+                .width(Length::Fill)
+                .clip(true),
+                plain_actions,
             ]
             .spacing(6)
+            .width(Length::Fill)
             .align_y(Alignment::Center);
 
             column![

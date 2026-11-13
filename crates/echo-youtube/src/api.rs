@@ -858,7 +858,7 @@ fn pick_best_audio_stream(
         .and_then(|arr| arr.last())
         .and_then(|t| t.get("url"))
         .and_then(|u| u.as_str())
-        .map(ToString::to_string);
+        .map(echo_core::upgrade_thumbnail_url);
 
     let playback_tracking_url = player
         .pointer("/playbackTracking/videostatsPlaybackUrl/baseUrl")
@@ -904,7 +904,7 @@ fn best_thumbnail(node: &Value) -> Option<String> {
         .and_then(|arr| arr.last())
         .and_then(|t| t.get("url"))
         .and_then(|u| u.as_str())
-        .map(ToString::to_string)
+        .map(echo_core::upgrade_thumbnail_url)
 }
 
 fn parse_duration_text(text: &str) -> Option<u32> {
