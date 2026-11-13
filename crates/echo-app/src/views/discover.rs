@@ -1,11 +1,11 @@
-﻿use std::collections::HashSet;
+use std::collections::HashSet;
 
 use iced::alignment::Alignment;
 use iced::widget::{
-    button, column, container, horizontal_space, responsive, row, scrollable, text,
+    button, column, container, horizontal_space, responsive, row, text,
     vertical_space,
 };
-use iced::{Color, Element, Font, Length};
+use iced::{Color, Element, Length};
 
 use echo_core::Track;
 use echo_youtube::BrowseItem;
@@ -14,7 +14,7 @@ use crate::icons;
 use crate::theme::{
     artwork_frame_style, color_from_rgb, divider_style, ghost_row_button_style,
     glowing_play_button_style, hero_banner_style, icon_button_style, outlined_pill_button_style,
-    pager_button_style, scroll_style, skeleton_block_style, soft_pill_button_style,
+    pager_button_style, skeleton_block_style, soft_pill_button_style,
     tile_button_style, top_pill_button_style, with_alpha,
 };
 use crate::{
@@ -497,52 +497,6 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
 
         let mut header_col = column![].spacing(18);
         let accent = color_from_rgb(p.primary);
-        let active_chip_title = self
-            .home_active_chip
-            .as_deref()
-            .and_then(|params| self.home_chips.iter().find(|c| c.params == params))
-            .map(|c| c.title.as_str());
-
-        let mut chip_bar = row![
-            button(text("All").size(13).font(semibold()))
-                .padding([7, 16])
-                .style(top_pill_button_style(p, self.home_active_chip.is_none()))
-                .on_press(Message::SelectHomeChip(None)),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center);
-        for chip in self.home_chips.iter().take(8) {
-            let active = self.home_active_chip.as_deref() == Some(chip.params.as_str());
-            chip_bar = chip_bar.push(
-                button(text(&chip.title).size(13).font(if active { semibold() } else { Font::DEFAULT }))
-                    .padding([7, 16])
-                    .style(top_pill_button_style(p, active))
-                    .on_press(Message::SelectHomeChip(Some(chip.params.clone()))),
-            );
-        }
-        header_col = header_col.push(
-            row![
-                scrollable(chip_bar)
-                    .direction(scrollable::Direction::Horizontal(
-                        scrollable::Scrollbar::new().width(0).scroller_width(0),
-                    ))
-                    .style(scroll_style(p))
-                    .width(Length::Fill),
-                button(
-                    row![
-                        icons::icon(icons::REFRESH, 13.0, muted),
-                        text("Refresh").size(12).font(semibold()),
-                    ]
-                    .spacing(6)
-                    .align_y(Alignment::Center),
-                )
-                .padding([7, 14])
-                .style(soft_pill_button_style(p))
-                .on_press(Message::LoadHome),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center),
-        );
 
         let mut mix_tracks: Vec<Track> = Vec::new();
         let mut seen_mix_ids = HashSet::new();
@@ -561,16 +515,11 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             }
         }
 
-        let kicker = match active_chip_title {
-            Some(mood) => format!("MOOD MIX • {}", mood.to_uppercase()),
-            None => greeting_kicker().to_string(),
-        };
-        let subline = match active_chip_title {
-            Some(mood) => format!("Curated {mood} picks tuned for right now"),
-            None if self.listener_ctx.known => {
-                "Personalized picks shaped by your taste graph & active session".to_string()
-            }
-            None => "Fresh tracks, artists & mixes ready to play".to_string(),
+        let kicker = greeting_kicker().to_string();
+        let subline = if self.listener_ctx.known {
+            "Personalized picks shaped by your taste graph & active session".to_string()
+        } else {
+            "Fresh tracks, artists & mixes ready to play".to_string()
         };
         let mut greeting_row = row![
             column![
@@ -580,6 +529,17 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             ]
             .spacing(3),
             horizontal_space(),
+            button(
+                row![
+                    icons::icon(icons::REFRESH, 13.0, muted),
+                    text("Refresh").size(12).font(semibold()),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center),
+            )
+            .padding([8, 14])
+            .style(soft_pill_button_style(p))
+            .on_press(Message::LoadHome),
         ]
         .spacing(12)
         .align_y(Alignment::End);
