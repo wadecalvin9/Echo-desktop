@@ -15,9 +15,9 @@ use crate::icons;
 use crate::theme::{
     account_badge_style, bare_input_style, color_from_rgb, divider_style, downloads_badge_style,
     ghost_row_button_style, glass_panel_style, icon_button_style, liked_gradient_badge_style,
-    local_badge_style, logo_badge_style, pill_search_input_style, popover_panel_style,
-    search_field_style, stats_rank_badge_style, tile_button_style, top_pill_button_style,
-    window_control_button_style, with_alpha,
+    local_badge_style, logo_badge_style, nav_item_button_style, pill_search_input_style,
+    popover_panel_style, search_field_style, stats_rank_badge_style, tile_button_style,
+    top_pill_button_style, window_control_button_style, with_alpha,
 };
 use crate::{
     bold, ellipsize, semibold, DetailPage, EchoApp, LibraryFilter, LibraryTab, Message,
@@ -181,6 +181,32 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         let can_back = !self.nav_history.is_empty() || self.viewing_detail.is_some() || self.show_expanded;
         let can_fwd = !self.nav_forward.is_empty();
 
+        let current_page_title = match &self.viewing_detail {
+            Some(DetailPage::Playlist(pl)) => ellipsize(&pl.title, 26),
+            Some(DetailPage::Album(alb)) => ellipsize(&alb.title, 26),
+            Some(DetailPage::Artist { page, .. }) => ellipsize(&page.name, 26),
+            Some(DetailPage::Category { title, .. }) => ellipsize(title, 26),
+            Some(DetailPage::ArtistItems { title, .. }) => ellipsize(title, 26),
+            None => match self.tab {
+                NavTab::Home => "Home".to_string(),
+                NavTab::Explore => "Explore".to_string(),
+                NavTab::Playlists => match self.library_tab {
+                    LibraryTab::Liked => "Liked Songs".to_string(),
+                    LibraryTab::History => "Recently Played".to_string(),
+                    LibraryTab::Downloads => "Downloads".to_string(),
+                    LibraryTab::Local => "Local Files".to_string(),
+                    LibraryTab::Songs => "Songs".to_string(),
+                    LibraryTab::Artists => "Artists".to_string(),
+                    LibraryTab::Albums => "Albums".to_string(),
+                    LibraryTab::Playlist(idx) => self.playlists.get(idx).map(|pl| ellipsize(&pl.name, 26)).unwrap_or_else(|| "Playlist".to_string()),
+                },
+                NavTab::Search => "Search".to_string(),
+                NavTab::Recognize => "Song Recognition".to_string(),
+                NavTab::Stats => "Listening Stats".to_string(),
+                NavTab::Settings => "Settings".to_string(),
+            },
+        };
+
         let mut nav_arrows = row![
             container(icons::icon(icons::ECHO_MARK, 16.0, Color::BLACK))
                 .width(28)
@@ -221,29 +247,20 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
             fwd_btn
         });
 
-        let home_active =
-            self.tab == NavTab::Home && self.viewing_detail.is_none() && !self.show_expanded;
-        let home_btn = self.with_tooltip(
-            button(
-                container(icons::icon(
-                    icons::HOME,
-                    21.0,
-                    if home_active { Color::WHITE } else { muted },
-                ))
-                .width(44)
-                .height(44)
-                .align_x(iced::alignment::Horizontal::Center)
-                .align_y(iced::alignment::Vertical::Center),
-            )
-            .padding(0)
-            .style(top_pill_button_style(p, false))
-            .on_press(Message::SelectTab(NavTab::Home)),
-            "Home",
-            tooltip::Position::Bottom,
-        );
+        if self.window_size.0 >= 900.0 {
+            nav_arrows = nav_arrows.push(
+                container(
+                    text(current_page_title)
+                        .size(13)
+                        .font(semibold())
+                        .color(Color::from_rgba(1.0, 1.0, 1.0, 0.78))
+                        .wrapping(Wrapping::None),
+                )
+                .clip(true)
+                .padding([0, 6]),
+            );
+        }
 
-        let explore_active =
-            self.tab == NavTab::Explore && self.viewing_detail.is_none() && !self.show_expanded;
         let mut search_row = row![
             icons::icon(icons::SEARCH, 19.0, muted),
             text_input("What do you want to play? (Ctrl+K)", &self.search_query)
@@ -265,48 +282,27 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
                     .on_press(Message::SearchQueryChanged(String::new())),
             );
         }
-        search_row = search_row
-            .push(container(horizontal_space()).width(1).height(22).style(divider_style(0.16)))
-            .push(self.with_tooltip(
-                button(icons::icon(
-                    icons::COMPASS,
-                    19.0,
-                    if explore_active { Color::WHITE } else { muted },
-                ))
-                .padding(6)
-                .style(icon_button_style(p, false))
-                .on_press(Message::SelectTab(NavTab::Explore)),
-                "Explore",
-                tooltip::Position::Bottom,
-            ));
         let search_box = container(search_row)
             .width(self.search_width())
             .padding([0, 14])
             .style(search_field_style(p));
 
-        let rail_icon =
-            |icon: &'static [u8], tab: NavTab, label: &'static str| -> Element<'_, Message> {
-                let active = self.tab == tab && self.viewing_detail.is_none() && !self.show_expanded;
-                self.with_tooltip(
-                    button(icons::icon(
-                        icon,
-                        18.0,
-                        if active { color_from_rgb(p.primary) } else { muted },
-                    ))
-                    .padding(9)
-                    .style(icon_button_style(p, active))
-                    .on_press(Message::SelectTab(tab)),
-                    label,
-                    tooltip::Position::Bottom,
-                )
-            };
-
         let account_initial = if self.yt.has_cookie() { "Y" } else { "E" };
         let settings_active =
             self.tab == NavTab::Settings && self.viewing_detail.is_none() && !self.show_expanded;
         let right_actions = row![
-            rail_icon(icons::MIC, NavTab::Recognize, "Song Recognition"),
-            rail_icon(icons::STATS, NavTab::Stats, "Listening Stats"),
+            self.with_tooltip(
+                button(icons::icon(
+                    icons::CAST,
+                    18.0,
+                    if self.active_cast_device.is_some() { color_from_rgb(p.primary) } else { muted }
+                ))
+                .padding(8)
+                .style(icon_button_style(p, self.active_cast_device.is_some()))
+                .on_press(Message::ToggleCastModal),
+                "Cast to Device",
+                tooltip::Position::Bottom,
+            ),
             horizontal_space().width(2),
             self.with_tooltip(
                 button(
@@ -402,9 +398,8 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
                 container(nav_arrows)
                     .width(Length::FillPortion(1))
                     .padding([0, 6]),
-                row![home_btn, search_box]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
+                container(search_box)
+                    .align_x(iced::alignment::Horizontal::Center),
                 container(right_cluster)
                     .width(Length::FillPortion(1))
                     .align_x(iced::alignment::Horizontal::Right),
@@ -419,27 +414,75 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
 
-        let in_library =
-            self.tab == NavTab::Playlists && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_home = self.tab == NavTab::Home && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_explore = self.tab == NavTab::Explore && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_stats = self.tab == NavTab::Stats && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_recognize = self.tab == NavTab::Recognize && self.viewing_detail.is_none() && !self.show_expanded;
+        let in_library = self.tab == NavTab::Playlists && self.viewing_detail.is_none() && !self.show_expanded;
+
+        let nav_pill = |icon: &'static [u8], active: bool, tip: &'static str, msg: Message| -> Element<'_, Message> {
+            self.with_tooltip(
+                button(
+                    container(icons::icon(icon, 20.0, if active { Color::WHITE } else { muted }))
+                        .width(42)
+                        .height(42)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center),
+                )
+                .padding(0)
+                .style(nav_item_button_style(p, active))
+                .on_press(msg),
+                tip,
+                tooltip::Position::Right,
+            )
+        };
+
         let mut col = column![
-            button(icons::icon(icons::LIBRARY, 22.0, muted))
-                .padding(10)
-                .style(icon_button_style(p, false))
+            nav_pill(icons::HOME, is_home, "Home", Message::SelectTab(NavTab::Home)),
+            nav_pill(icons::COMPASS, is_explore, "Explore", Message::SelectTab(NavTab::Explore)),
+            nav_pill(icons::STATS, is_stats, "Listening Stats", Message::SelectTab(NavTab::Stats)),
+            nav_pill(icons::MIC, is_recognize, "Song Recognition", Message::SelectTab(NavTab::Recognize)),
+            vertical_space().height(4),
+            container(horizontal_space()).height(1).width(44).style(divider_style(0.10)),
+            vertical_space().height(4),
+            self.with_tooltip(
+                button(
+                    container(icons::icon(icons::LIBRARY, 20.0, if in_library { Color::WHITE } else { muted }))
+                        .width(42)
+                        .height(42)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center),
+                )
+                .padding(0)
+                .style(nav_item_button_style(p, in_library))
                 .on_press(Message::ToggleLeftSidebar),
-            button(icons::icon(icons::PLUS, 18.0, muted))
-                .padding(8)
-                .style(icon_button_style(p, self.show_new_playlist_input))
+                "Expand Your Library",
+                tooltip::Position::Right,
+            ),
+            self.with_tooltip(
+                button(
+                    container(icons::icon(icons::PLUS, 18.0, muted))
+                        .width(42)
+                        .height(42)
+                        .align_x(iced::alignment::Horizontal::Center)
+                        .align_y(iced::alignment::Vertical::Center),
+                )
+                .padding(0)
+                .style(nav_item_button_style(p, self.show_new_playlist_input))
                 .on_press(Message::ExpandAndNewPlaylist),
+                "Create Playlist",
+                tooltip::Position::Right,
+            ),
             vertical_space().height(4),
             button(
-                container(icons::icon(icons::HEART_FILLED, 20.0, Color::WHITE))
-                    .width(48)
-                    .height(48)
+                container(icons::icon(icons::HEART_FILLED, 18.0, Color::WHITE))
+                    .width(42)
+                    .height(42)
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center)
                     .style(liked_gradient_badge_style()),
             )
-            .padding(4)
+            .padding(2)
             .style(ghost_row_button_style(
                 p,
                 in_library && self.library_tab == LibraryTab::Liked,
@@ -448,30 +491,30 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
             button(
                 container(icons::icon(
                     icons::DOWNLOAD,
-                    20.0,
+                    18.0,
                     color_from_rgb(p.primary),
                 ))
-                .width(48)
-                .height(48)
+                .width(42)
+                .height(42)
                 .align_x(iced::alignment::Horizontal::Center)
                 .align_y(iced::alignment::Vertical::Center)
                 .style(downloads_badge_style()),
             )
-            .padding(4)
+            .padding(2)
             .style(ghost_row_button_style(
                 p,
                 in_library && self.library_tab == LibraryTab::Downloads,
             ))
             .on_press(Message::SelectLibraryTab(LibraryTab::Downloads)),
             button(
-                container(icons::icon(icons::FOLDER, 20.0, Color::WHITE))
-                    .width(48)
-                    .height(48)
+                container(icons::icon(icons::FOLDER, 18.0, Color::WHITE))
+                    .width(42)
+                    .height(42)
                     .align_x(iced::alignment::Horizontal::Center)
                     .align_y(iced::alignment::Vertical::Center)
                     .style(local_badge_style()),
             )
-            .padding(4)
+            .padding(2)
             .style(ghost_row_button_style(
                 p,
                 in_library && self.library_tab == LibraryTab::Local,
@@ -484,8 +527,8 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         for (idx, pl) in self.playlists.iter().enumerate() {
             let active = in_library && self.library_tab == LibraryTab::Playlist(idx);
             col = col.push(
-                button(self.artwork_widget(pl.thumbnail_url.as_deref(), 48.0, false))
-                    .padding(4)
+                button(self.artwork_widget(pl.thumbnail_url.as_deref(), 42.0, false))
+                    .padding(2)
                     .style(ghost_row_button_style(p, active))
                     .on_press(Message::SelectLibraryTab(LibraryTab::Playlist(idx))),
             );
@@ -494,8 +537,8 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         for pl in self.account_playlists.iter().take(6) {
             let active = self.active_playlist_id() == Some(pl.id.as_str());
             col = col.push(
-                button(self.artwork_widget(pl.thumbnail_url.as_deref(), 48.0, false))
-                    .padding(4)
+                button(self.artwork_widget(pl.thumbnail_url.as_deref(), 42.0, false))
+                    .padding(2)
                     .style(ghost_row_button_style(p, active))
                     .on_press(Message::OpenPlaylist {
                         id: pl.id.clone(),
@@ -517,23 +560,63 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
 
+        let is_home = self.tab == NavTab::Home && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_explore = self.tab == NavTab::Explore && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_stats = self.tab == NavTab::Stats && self.viewing_detail.is_none() && !self.show_expanded;
+        let is_recognize = self.tab == NavTab::Recognize && self.viewing_detail.is_none() && !self.show_expanded;
+        let in_library = self.tab == NavTab::Playlists && self.viewing_detail.is_none() && !self.show_expanded;
+
+        let primary_nav_item = |icon: &'static [u8], label: &'static str, active: bool, msg: Message| -> Element<'_, Message> {
+            button(
+                row![
+                    icons::icon(icon, 20.0, if active { Color::WHITE } else { muted }),
+                    text(label)
+                        .size(14)
+                        .font(if active { bold() } else { semibold() })
+                        .color(if active { Color::WHITE } else { muted }),
+                ]
+                .spacing(14)
+                .align_y(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding([9, 12])
+            .style(nav_item_button_style(p, active))
+            .on_press(msg)
+            .into()
+        };
+
+        let primary_nav = column![
+            primary_nav_item(icons::HOME, "Home", is_home, Message::SelectTab(NavTab::Home)),
+            primary_nav_item(icons::COMPASS, "Explore", is_explore, Message::SelectTab(NavTab::Explore)),
+            primary_nav_item(icons::STATS, "Listening Stats", is_stats, Message::SelectTab(NavTab::Stats)),
+            primary_nav_item(icons::MIC, "Song Recognition", is_recognize, Message::SelectTab(NavTab::Recognize)),
+        ]
+        .spacing(2);
+
         let header = row![
             button(
                 row![
-                    icons::icon(icons::LIBRARY, 22.0, muted),
-                    text("Your Library").size(15).font(bold()).color(muted),
+                    icons::icon(icons::LIBRARY, 20.0, if in_library { Color::WHITE } else { muted }),
+                    text("Your Library")
+                        .size(14)
+                        .font(bold())
+                        .color(if in_library { Color::WHITE } else { muted }),
                 ]
-                .spacing(12)
+                .spacing(10)
                 .align_y(Alignment::Center),
             )
             .padding([6, 8])
             .style(ghost_row_button_style(p, false))
-            .on_press(Message::ToggleLeftSidebar),
+            .on_press(Message::SelectTab(NavTab::Playlists)),
             horizontal_space(),
-            button(icons::icon(icons::PLUS, 18.0, muted))
-                .padding(8)
+            button(icons::icon(icons::PLUS, 17.0, muted))
+                .padding(7)
                 .style(icon_button_style(p, self.show_new_playlist_input))
                 .on_press(Message::ToggleNewPlaylistInput),
+            button(icons::icon(icons::BACK, 15.0, muted))
+                .padding(7)
+                .style(icon_button_style(p, false))
+                .on_press(Message::ToggleLeftSidebar),
         ]
         .align_y(Alignment::Center);
 
@@ -568,9 +651,6 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
         let show_downloads =
             matches!(self.library_filter, LibraryFilter::All | LibraryFilter::Downloads);
         let show_local = matches!(self.library_filter, LibraryFilter::All | LibraryFilter::Local);
-
-        let in_library =
-            self.tab == NavTab::Playlists && self.viewing_detail.is_none() && !self.show_expanded;
 
         if show_songs {
             let songs_active = in_library && self.library_tab == LibraryTab::Songs;
@@ -798,19 +878,23 @@ impl EchoApp {    pub(crate) fn view_cast_modal(&self) -> Element<'_, Message> {
             }
         }
 
-        container(
-            column![
-                header,
-                vertical_space().height(8),
-                self.vscroll(list)
-            ]
-            .spacing(4),
-        )
-        .width(self.left_sidebar_width())
-        .height(Length::Fill)
-        .padding([12, 8])
-        .style(glass_panel_style(p))
-        .into()
+        let sidebar_content = column![
+            primary_nav,
+            vertical_space().height(6),
+            container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.08)),
+            vertical_space().height(6),
+            header,
+            vertical_space().height(6),
+            self.vscroll(list),
+        ]
+        .spacing(2);
+
+        container(sidebar_content)
+            .width(self.left_sidebar_width())
+            .height(Length::Fill)
+            .padding([12, 8])
+            .style(glass_panel_style(p))
+            .into()
     }
 
     fn sidebar_item<'a>(

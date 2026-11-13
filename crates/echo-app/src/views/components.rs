@@ -1,4 +1,4 @@
-﻿use iced::alignment::Alignment;
+use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
 use iced::widget::{
     scrollable,
@@ -487,64 +487,88 @@ impl EchoApp {    pub(crate) fn artwork_widget(&self, url: Option<&str>, size: f
             .style(ghost_row_button_style(p, is_current))
             .on_press(play_action);
 
-        let subtle = with_alpha(muted, if row_hovered { 0.95 } else { 0.45 });
-        let mut actions = row![
-            button(if is_liked {
-                icons::icon(icons::HEART_FILLED, 16.0, accent)
-            } else {
-                icons::icon(icons::HEART_OUTLINE, 16.0, subtle)
-            })
-            .padding(6)
-            .style(icon_button_style(p, false))
-            .on_press(Message::ToggleLikeTrack(track.clone())),
-            button(icons::icon(icons::PLUS, 15.0, subtle))
-                .padding(6)
-                .style(icon_button_style(p, false))
-                .on_press(Message::QueueAddBack(track.clone())),
-        ]
-        .spacing(0)
-        .align_y(Alignment::Center);
+        let subtle = with_alpha(muted, 0.90);
+        let mut actions = row![].spacing(2).align_y(Alignment::Center);
+
+        if is_liked {
+            actions = actions.push(
+                button(icons::icon(icons::HEART_FILLED, 16.0, accent))
+                    .padding(6)
+                    .style(icon_button_style(p, false))
+                    .on_press(Message::ToggleLikeTrack(track.clone())),
+            );
+        } else if row_hovered {
+            actions = actions.push(
+                button(icons::icon(icons::HEART_OUTLINE, 16.0, subtle))
+                    .padding(6)
+                    .style(icon_button_style(p, false))
+                    .on_press(Message::ToggleLikeTrack(track.clone())),
+            );
+        } else {
+            actions = actions.push(container(horizontal_space()).width(28));
+        }
+
+        if row_hovered {
+            actions = actions.push(
+                button(icons::icon(icons::PLUS, 15.0, subtle))
+                    .padding(6)
+                    .style(icon_button_style(p, false))
+                    .on_press(Message::QueueAddBack(track.clone())),
+            );
+        }
+
         if !track.is_local {
             let is_downloaded = self.downloaded_id_set.contains(&track.id);
             let is_downloading = self.downloading_ids.contains(&track.id);
-            let dl_color = if is_downloaded || is_downloading {
-                accent
-            } else {
-                subtle
-            };
-            let dl_msg = if is_downloaded {
-                Message::RemoveDownload(track.id.clone())
-            } else {
-                Message::DownloadTrack(track.clone())
-            };
-            actions = actions.push(
-                button(icons::icon(icons::DOWNLOAD, 15.0, dl_color))
-                    .padding(6)
-                    .style(icon_button_style(p, false))
-                    .on_press(dl_msg),
-            );
+            if is_downloaded || is_downloading {
+                let dl_color = accent;
+                let dl_msg = if is_downloaded {
+                    Message::RemoveDownload(track.id.clone())
+                } else {
+                    Message::DownloadTrack(track.clone())
+                };
+                actions = actions.push(
+                    button(icons::icon(icons::DOWNLOAD, 15.0, dl_color))
+                        .padding(6)
+                        .style(icon_button_style(p, false))
+                        .on_press(dl_msg),
+                );
+            } else if row_hovered {
+                actions = actions.push(
+                    button(icons::icon(icons::DOWNLOAD, 15.0, subtle))
+                        .padding(6)
+                        .style(icon_button_style(p, false))
+                        .on_press(Message::DownloadTrack(track.clone())),
+                );
+            }
         }
+
         if self.tab == NavTab::Playlists {
             if let LibraryTab::Playlist(idx) = self.library_tab {
                 if let Some(pl) = self.playlists.get(idx) {
-                    actions = actions.push(
-                        button(icons::icon(icons::CLOSE, 14.0, subtle))
-                            .padding(6)
-                            .style(icon_button_style(p, false))
-                            .on_press(Message::RemoveFromPlaylist {
-                                playlist_id: pl.id.clone(),
-                                song_id: track.id.clone(),
-                            }),
-                    );
+                    if row_hovered {
+                        actions = actions.push(
+                            button(icons::icon(icons::CLOSE, 14.0, subtle))
+                                .padding(6)
+                                .style(icon_button_style(p, false))
+                                .on_press(Message::RemoveFromPlaylist {
+                                    playlist_id: pl.id.clone(),
+                                    song_id: track.id.clone(),
+                                }),
+                        );
+                    }
                 }
             }
         }
-        actions = actions.push(
-            button(icons::icon(icons::MORE_HORIZ, 15.0, subtle))
-                .padding(6)
-                .style(icon_button_style(p, false))
-                .on_press(Message::OpenTrackMenu(track.clone())),
-        );
+
+        if row_hovered {
+            actions = actions.push(
+                button(icons::icon(icons::MORE_HORIZ, 15.0, subtle))
+                    .padding(6)
+                    .style(icon_button_style(p, false))
+                    .on_press(Message::OpenTrackMenu(track.clone())),
+            );
+        }
 
         let actions_slot = container(actions)
             .width(Length::Fixed(132.0))

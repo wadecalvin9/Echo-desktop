@@ -4,6 +4,7 @@ mod ranking;
 mod smtc;
 mod tasks;
 mod theme;
+mod tray;
 mod types;
 mod views;
 mod update;
@@ -201,6 +202,7 @@ pub(crate) struct EchoApp {
     window_maximized: bool,
     smtc: Option<smtc::SmtcBridge>,
     smtc_requested: bool,
+    tray: Option<tray::TrayBridge>,
     listener_ctx: ListenerContext,
     backup_status: Option<String>,
     repair_running: bool,
@@ -224,6 +226,8 @@ pub(crate) struct EchoApp {
     cast_address_input: String,
     available_audio_devices: Vec<String>,
     settings_section: SettingsSection,
+    playlist_filter_query: String,
+    show_stream_inspector: bool,
 }
 
 impl EchoApp {
@@ -373,6 +377,7 @@ impl EchoApp {
             window_maximized: false,
             smtc: None,
             smtc_requested: false,
+            tray: None,
             listener_ctx: ListenerContext::default(),
             backup_status: None,
             repair_running: false,
@@ -394,6 +399,8 @@ impl EchoApp {
             cast_address_input: String::new(),
             available_audio_devices,
             settings_section: SettingsSection::All,
+            playlist_filter_query: String::new(),
+            show_stream_inspector: false,
         };
 
         app.refresh_db_views();
@@ -461,7 +468,10 @@ impl EchoApp {
             | Message::QueueAddBack(..)
             | Message::QueueJump(..)
             | Message::QueueRemove(..)
+            | Message::QueueMoveUp(..)
+            | Message::QueueMoveDown(..)
             | Message::QueueClear
+            | Message::SaveQueueAsPlaylist
             | Message::TogglePlayPause
             | Message::NextTrack
             | Message::PrevTrack
@@ -488,6 +498,7 @@ impl EchoApp {
 
             // Navigation, Window & Shell UI
             Message::SelectTab(..)
+            | Message::PlaylistFilterChanged(..)
             | Message::SelectStatsRange(..)
             | Message::SelectLibraryTab(..)
             | Message::LibraryFilterSelected(..)
@@ -500,6 +511,7 @@ impl EchoApp {
             | Message::ToggleRightSidebar
             | Message::ToggleExpandedPlayer
             | Message::ToggleMiniPlayer
+            | Message::ToggleStreamInspector
             | Message::FocusSearch
             | Message::KeyPressed(..)
             | Message::WindowOpened(..)
@@ -594,7 +606,7 @@ impl EchoApp {
     }
 
     fn show_right_rail_effective(&self) -> bool {
-        self.show_right_rail && self.window_size.0 >= 980.0
+        !self.show_expanded && self.show_right_rail && self.window_size.0 >= 980.0
     }
 
     fn center_width(&self) -> f32 {
@@ -738,8 +750,7 @@ impl EchoApp {
                 .width(self.search_width())
                 .padding(8)
                 .style(popover_panel_style(p));
-            // Offset by home_btn (44) + spacing (8) so the popover aligns flush beneath search_box.
-            let aligned_row = row![horizontal_space().width(52), dropdown].align_y(Alignment::Start);
+            let aligned_row = row![dropdown].align_y(Alignment::Start);
             let overlay = mouse_area(
                 container(
                     column![vertical_space().height(60), aligned_row].align_x(Alignment::Center),
@@ -906,6 +917,10 @@ impl EchoApp {
 
         if self.show_cast_modal {
             layers.push(self.view_cast_modal());
+        }
+
+        if self.show_stream_inspector {
+            layers.push(self.view_stream_inspector());
         }
 
         stack(layers).into()

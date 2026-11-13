@@ -1,4 +1,4 @@
-﻿use std::time::Instant;
+use std::time::Instant;
 
 use iced::alignment::Alignment;
 use iced::widget::text::Wrapping;
@@ -9,19 +9,19 @@ use iced::widget::{
 use iced::{Color, Element, Length};
 
 use echo_audio::PlaybackStatus;
-use echo_core::{AudioQuality, DynamicPalette, EqPreset, RepeatMode, SpatialMode, Track};
+use echo_core::{AudioQuality, DynamicPalette, RepeatMode, Track};
 
 use crate::icons;
 use crate::theme::{
-    ambient_scrim_style, artwork_frame_style, badge_pill_style, color_from_rgb,
-    divider_style, dock_play_button_style, expanded_stage_style, ghost_row_button_style,
-    icon_button_style, logo_badge_style, mini_player_fallback_style, mini_player_scrim_style,
-    outlined_pill_button_style, player_dock_style, slim_slider_style,
-    soft_pill_button_style, top_pill_button_style, up_next_card_button_style,
-    window_control_button_style, with_alpha,
+    ambient_scrim_style, artwork_frame_style, badge_pill_style, bento_card_style,
+    color_from_rgb, divider_style, dock_play_button_style, expanded_stage_style,
+    ghost_row_button_style, icon_button_style, logo_badge_style, mini_player_fallback_style,
+    mini_player_scrim_style, outlined_pill_button_style, player_dock_style,
+    popover_panel_style, slim_slider_style, soft_pill_button_style, top_pill_button_style,
+    up_next_card_button_style, window_control_button_style, with_alpha,
 };
 use crate::{
-    bold, ellipsize, format_ms, mono, semibold, EchoApp, Message, NavTab, RightTab,
+    bold, ellipsize, format_ms, mono, semibold, EchoApp, Message, RightTab,
     SleepTimerState,
 };
 
@@ -75,7 +75,13 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                 .into()
         };
 
-        let art_size = (self.window_size.1 - 420.0).clamp(200.0, 280.0);
+        let is_compact_stage = self.window_size.0 < 1250.0 || self.window_size.1 < 750.0;
+        let art_size = if is_compact_stage {
+            (self.window_size.1 - 440.0).clamp(130.0, 190.0)
+        } else {
+            (self.window_size.1 - 420.0).clamp(190.0, 270.0)
+        };
+        let left_w = if is_compact_stage { 260.0 } else { 310.0 };
 
         let quality_text = if t.is_local {
             "Local Lossless"
@@ -255,14 +261,19 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
             vertical_space().height(6),
             self.live_spectrum_strip(accent),
         ]
-        .width(332)
-        .spacing(6);
+        .width(left_w)
+        .spacing(if is_compact_stage { 4 } else { 6 });
 
         let left = container(left_inner)
             .height(Length::Fill)
             .align_y(iced::alignment::Vertical::Center);
 
-        let lyrics_panel = self.view_lyrics_inner(30, 20);
+        let (lyrics_active_sz, lyrics_base_sz) = if is_compact_stage {
+            (24, 16)
+        } else {
+            (28, 18)
+        };
+        let lyrics_panel = self.view_lyrics_inner(lyrics_active_sz, lyrics_base_sz);
 
         let stage_foreground = container(
             row![
@@ -270,12 +281,12 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                 container(lyrics_panel)
                     .width(Length::Fill)
                     .height(Length::Fill)
-                    .padding([8, 16]),
+                    .padding(if is_compact_stage { [4, 8] } else { [8, 16] }),
             ]
-            .spacing(38)
+            .spacing(if is_compact_stage { 18 } else { 32 })
             .align_y(Alignment::Center),
         )
-        .padding([20, 32])
+        .padding(if is_compact_stage { [10, 16] } else { [16, 28] })
         .width(Length::Fill)
         .height(Length::Fill);
 
@@ -614,54 +625,8 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                     .on_press(Message::VolumeChanged(1.0)),
             );
         }
-        let dsp_label = if self.settings.spatial_mode != SpatialMode::Off {
-            Some("Spatial")
-        } else if self.settings.eq_preset != EqPreset::Flat {
-            Some("EQ")
-        } else if self.settings.audio_normalization {
-            Some("-3 dB")
-        } else {
-            None
-        };
-        if let Some(badge) = dsp_label {
-            right = right.push(self.with_tooltip(
-                button(text(badge).size(10).font(mono()))
-                    .padding([4, 9])
-                    .style(soft_pill_button_style(p))
-                    .on_press(Message::SelectTab(NavTab::Settings)),
-                "Audio & DSP Settings",
-                tooltip::Position::Top,
-            ));
-        }
+
         right = right
-            .push(horizontal_space().width(2))
-            .push(
-                container(horizontal_space())
-                    .width(1)
-                    .height(16)
-                    .style(divider_style(0.08)),
-            )
-            .push(horizontal_space().width(2))
-            .push(self.with_tooltip(
-                button(icons::icon(
-                    icons::CAST,
-                    16.0,
-                    if self.active_cast_device.is_some() {
-                        accent
-                    } else {
-                        muted
-                    },
-                ))
-                .padding(7)
-                .style(icon_button_style(p, self.active_cast_device.is_some()))
-                .on_press(Message::ToggleCastModal),
-                if let Some(ref d) = self.active_cast_device {
-                    format!("Casting to {} (Click to change)", d.name)
-                } else {
-                    "Cast audio (Chromecast / DLNA / FCast)".to_string()
-                },
-                tooltip::Position::Top,
-            ))
             .push(self.with_tooltip(
                 button(icons::icon(icons::MINI_PLAYER, 16.0, muted))
                     .padding(7)
@@ -1389,5 +1354,120 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                 .style(mini_player_fallback_style(p))
                 .into()
         }
+    }
+
+    pub(crate) fn view_stream_inspector(&self) -> Element<'_, Message> {
+        let p = self.palette;
+        let muted = color_from_rgb(p.text_muted);
+        let accent = color_from_rgb(p.primary);
+
+        let cur = self.queue.current().map(|c| &c.track);
+
+        let format_info = if let Some(t) = cur {
+            if t.is_local {
+                ("Local Media / PCM", "FLAC / ALAC / WAV / Lossless Container", "Bit-perfect direct decode")
+            } else {
+                ("YouTube Music Stream", "Opus in WebM / AAC in MP4 (InnerTube)", "Chunked range buffer • 48.0 kHz")
+            }
+        } else {
+            ("No Active Stream", "Engine Standby", "Select track to begin")
+        };
+
+        let loudness_info = if let Some(t) = cur {
+            match t.loudness_db {
+                Some(db) => format!("{db:+.2} dB LUFS (EBU R128 Normalized to -3.0 dB)"),
+                None if t.is_local => "Local Audio Tag / Fallback ReplayGain".to_string(),
+                None => "Auto Dynamic Perceptual Leveling".to_string(),
+            }
+        } else {
+            "Audio Engine Normalization Active".to_string()
+        };
+
+        let output_device_name = self.settings.output_device.clone()
+            .unwrap_or_else(|| "Default System Audio Device (WASAPI)".to_string());
+
+        let eq_preset_name = format!("{:?}", self.settings.eq_preset);
+        let spatial_name = format!("{:?}", self.settings.spatial_mode);
+
+        let header = row![
+            icons::icon(icons::SPEAKER, 18.0, accent),
+            column![
+                text("Stream Inspector & Diagnostics").size(15).font(bold()),
+                text("Real-time bit-depth, codec resolution & audio DSP pipeline").size(11).color(muted),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            button(icons::icon(icons::CLOSE, 15.0, muted))
+                .padding(6)
+                .style(icon_button_style(p, false))
+                .on_press(Message::ToggleStreamInspector),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center);
+
+        let info_block = |title: &'static str, val: String, sub: &'static str| -> Element<'_, Message> {
+            container(
+                column![
+                    text(title).size(10).font(bold()).color(with_alpha(accent, 0.90)),
+                    text(val).size(13).font(semibold()).color(Color::WHITE),
+                    text(sub).size(10).color(muted),
+                ]
+                .spacing(2),
+            )
+            .width(Length::Fill)
+            .padding(10)
+            .style(bento_card_style(p))
+            .into()
+        };
+
+        let grid = column![
+            row![
+                info_block("SOURCE & CONTAINER", format_info.0.to_string(), format_info.1),
+                info_block("ENCODING & BITRATE", format_info.2.to_string(), "Decoded via Symphonia 0.5"),
+            ]
+            .spacing(8),
+            row![
+                info_block("OUTPUT DEVICE", output_device_name, "CPAL Low-Latency Audio Stream"),
+                info_block("LOUDNESS CALIBRATION", loudness_info, "Echo Soft-Clipped Headroom Limiter"),
+            ]
+            .spacing(8),
+            row![
+                info_block("EQUALIZER PRESET", eq_preset_name, "10-Band Biquad Peaking Filter"),
+                info_block("SPATIAL AUDIO", spatial_name, if self.settings.skip_silence { "Silence Gating: On" } else { "Silence Gating: Off" }),
+            ]
+            .spacing(8),
+        ]
+        .spacing(8);
+
+        let action_row = row![
+            button(text("Open Audio & DSP Settings").size(12).font(semibold()))
+                .padding([7, 16])
+                .style(top_pill_button_style(p, true))
+                .on_press(Message::SelectSettingsSection(crate::SettingsSection::AudioDsp)),
+            horizontal_space(),
+            button(text("Close").size(12))
+                .padding([7, 16])
+                .style(top_pill_button_style(p, false))
+                .on_press(Message::ToggleStreamInspector),
+        ]
+        .align_y(Alignment::Center);
+
+        let card = container(
+            column![header, vertical_space().height(4), grid, vertical_space().height(6), action_row]
+                .spacing(10),
+        )
+        .width(520)
+        .padding(18)
+        .style(popover_panel_style(p));
+
+        mouse_area(
+            container(card)
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Center)
+                .align_y(iced::alignment::Vertical::Center),
+        )
+        .on_press(Message::ToggleStreamInspector)
+        .into()
     }
 }

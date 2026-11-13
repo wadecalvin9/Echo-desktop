@@ -535,11 +535,16 @@ pub fn outlined_pill_button_style(
 
 /// Page header: smooth atmospheric color glow fading seamlessly into the panel surface.
 pub fn hero_banner_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    hero_banner_tinted_style(p.tint, p.surface)
+}
+
+/// Page header with explicit cover-reactive tint color.
+pub fn hero_banner_tinted_style(tint: RgbColor, surface: RgbColor) -> impl Fn(&Theme) -> container::Style {
     move |_| {
-        let top = color_from_rgb(p.tint);
-        let mid_hi = color_from_rgb(p.tint.lerp(p.surface, 0.36));
-        let mid_lo = color_from_rgb(p.tint.lerp(p.surface, 0.78));
-        let bottom = color_from_rgb(p.surface);
+        let top = color_from_rgb(tint);
+        let mid_hi = color_from_rgb(tint.lerp(surface, 0.36));
+        let mid_lo = color_from_rgb(tint.lerp(surface, 0.78));
+        let bottom = color_from_rgb(surface);
         let grad = Linear::new(Radians(std::f32::consts::PI))
             .add_stop(0.0, top)
             .add_stop(0.32, mid_hi)
@@ -547,7 +552,7 @@ pub fn hero_banner_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Sty
             .add_stop(1.0, bottom);
         container::Style {
             background: Some(Background::Gradient(Gradient::Linear(grad))),
-            text_color: Some(color_from_rgb(p.text)),
+            text_color: Some(Color::WHITE),
             border: Border {
                 radius: border::Radius {
                     top_left: 12.0,
@@ -734,6 +739,45 @@ pub fn ghost_row_button_style(
             },
             ..Default::default()
         }
+    }
+}
+
+/// Spotify-style primary navigation row button with subtle hover elevation and active highlight.
+pub fn nav_item_button_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let (bg, fg) = if active {
+            (white(0.12), Color::WHITE)
+        } else if matches!(status, button::Status::Hovered | button::Status::Pressed) {
+            (white(0.06), Color::WHITE)
+        } else {
+            (Color::TRANSPARENT, color_from_rgb(p.text_muted))
+        };
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: fg,
+            border: Border {
+                radius: 8.0.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+}
+
+/// Frosted translucent sticky table header style for playlists and albums.
+pub fn sticky_header_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| container::Style {
+        background: Some(Background::Color(with_alpha(color_from_rgb(p.surface), 0.96))),
+        text_color: Some(color_from_rgb(p.text_muted)),
+        border: Border {
+            color: white(0.06),
+            width: 1.0,
+            ..Default::default()
+        },
+        ..Default::default()
     }
 }
 

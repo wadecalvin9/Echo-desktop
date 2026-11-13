@@ -2,20 +2,21 @@ use std::collections::HashSet;
 
 use iced::alignment::Alignment;
 use iced::widget::{
-    button, column, container, horizontal_space, responsive, row, text,
+    button, column, container, horizontal_space, responsive, row, text, text_input,
     vertical_space,
 };
 use iced::{Color, Element, Length};
 
-use echo_core::Track;
+use echo_core::{DynamicPalette, Track};
 use echo_youtube::BrowseItem;
 
 use crate::icons;
 use crate::theme::{
-    artwork_frame_style, color_from_rgb, divider_style, ghost_row_button_style,
-    glowing_play_button_style, hero_banner_style, icon_button_style, outlined_pill_button_style,
-    pager_button_style, skeleton_block_style, soft_pill_button_style,
-    tile_button_style, top_pill_button_style, with_alpha,
+    artwork_frame_style, bare_input_style, color_from_rgb, divider_style, ghost_row_button_style,
+    glowing_play_button_style, hero_banner_style, hero_banner_tinted_style, icon_button_style,
+    outlined_pill_button_style, pager_button_style, search_field_style, skeleton_block_style,
+    soft_pill_button_style, sticky_header_style, tile_button_style, top_pill_button_style,
+    with_alpha,
 };
 use crate::{
     bold, ellipsize, greeting_kicker, greeting_label, semibold, DetailPage, EchoApp,
@@ -82,10 +83,15 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
         ]
         .spacing(24)
         .align_y(Alignment::End);
+        let page_tint = cover_url
+            .and_then(|u| self.cover_bytes.get(u))
+            .and_then(|b| DynamicPalette::from_image_bytes(b, self.settings.theme_mode))
+            .map(|pal| pal.tint)
+            .unwrap_or(p.tint);
         let hero = container(hero_col)
             .padding([26, 24])
             .width(Length::Fill)
-            .style(hero_banner_style(p));
+            .style(hero_banner_tinted_style(page_tint, p.surface));
 
         let mut toolbar = row![].spacing(20).align_y(Alignment::Center);
         if !tracks.is_empty() {
@@ -152,20 +158,67 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
             }
         }
 
-        let rows: Element<'_, Message> = if tracks.is_empty() {
+        if tracks.len() > 1 {
+            let mut filter_row = row![
+                icons::icon(icons::SEARCH, 14.0, muted),
+                text_input("Filter in playlist...", &self.playlist_filter_query)
+                    .on_input(Message::PlaylistFilterChanged)
+                    .style(bare_input_style(p))
+                    .padding([5, 4])
+                    .size(13)
+                    .width(Length::Fill),
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center);
+            if !self.playlist_filter_query.is_empty() {
+                filter_row = filter_row.push(
+                    button(icons::icon(icons::CLOSE, 13.0, muted))
+                        .padding(4)
+                        .style(icon_button_style(p, false))
+                        .on_press(Message::PlaylistFilterChanged(String::new())),
+                );
+            }
+            let filter_box = container(filter_row)
+                .width(200)
+                .padding([2, 10])
+                .style(search_field_style(p));
+            toolbar = toolbar.push(horizontal_space());
+            toolbar = toolbar.push(filter_box);
+        }
+
+        let filtered_tracks: Vec<&Track> = if self.playlist_filter_query.trim().is_empty() {
+            tracks.iter().collect()
+        } else {
+            let q = self.playlist_filter_query.trim().to_lowercase();
+            tracks
+                .iter()
+                .filter(|t| {
+                    t.title.to_lowercase().contains(&q)
+                        || t.artist_display().to_lowercase().contains(&q)
+                        || t.album.as_ref().map(|a| a.title.to_lowercase().contains(&q)).unwrap_or(false)
+                })
+                .collect()
+        };
+
+        let rows: Element<'_, Message> = if filtered_tracks.is_empty() {
             container(
-                text("Nothing here yet. Play something and it will show up.")
-                    .size(15)
-                    .color(muted),
+                text(if tracks.is_empty() {
+                    "Nothing here yet. Play something and it will show up."
+                } else {
+                    "No tracks match your filter."
+                })
+                .size(14)
+                .color(muted),
             )
             .padding([24, 28])
             .into()
         } else {
-            let list = tracks
+            let play_all: Vec<Track> = filtered_tracks.iter().map(|&t| t.clone()).collect();
+            let list = filtered_tracks
                 .iter()
                 .enumerate()
-                .fold(column![].spacing(0), |col, (idx, t)| {
-                    col.push(self.table_track_row(idx + 1, t, Some((tracks.to_vec(), idx))))
+                .fold(column![].spacing(0), |col, (idx, &t)| {
+                    col.push(self.table_track_row(idx + 1, t, Some((play_all.clone(), idx))))
                 });
             container(list).padding([0, 16]).into()
         };
@@ -216,9 +269,10 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                     .padding([8, 12])
                     .align_y(Alignment::Center),
             )
-            .padding([0, 16]),
+            .padding([0, 16])
+            .style(sticky_header_style(p)),
             container(container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.10)))
-                .padding([0, 28]),
+                .padding([0, 16]),
         ]
         .spacing(0)
         .into()
@@ -786,6 +840,11 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                 .collect::<Vec<_>>()
                 .join(" • ");
 
+                let page_tint = alb.thumbnail_url.as_deref()
+                    .and_then(|u| self.cover_bytes.get(u))
+                    .and_then(|b| DynamicPalette::from_image_bytes(b, self.settings.theme_mode))
+                    .map(|pal| pal.tint)
+                    .unwrap_or(p.tint);
                 let mut col = column![
                     container(
                         row![
@@ -812,7 +871,7 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                     )
                     .padding([26, 24])
                     .width(Length::Fill)
-                    .style(hero_banner_style(p)),
+                    .style(hero_banner_tinted_style(page_tint, p.surface)),
                 ]
                 .spacing(0);
 
@@ -953,6 +1012,12 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                 .collect::<Vec<_>>()
                 .join(" • ");
 
+                let page_tint = page.thumbnail_url.as_deref()
+                    .and_then(|u| self.cover_bytes.get(u))
+                    .and_then(|b| DynamicPalette::from_image_bytes(b, self.settings.theme_mode))
+                    .map(|pal| pal.tint)
+                    .unwrap_or(p.tint);
+
                 let mut col = column![
                     container(
                         row![
@@ -984,7 +1049,7 @@ impl EchoApp {    pub(crate) fn view_hero_and_table<'a>(
                     )
                     .padding([24, 24])
                     .width(Length::Fill)
-                    .style(hero_banner_style(p)),
+                    .style(hero_banner_tinted_style(page_tint, p.surface)),
                     container(actions).padding([16, 24]),
                 ]
                 .spacing(6);

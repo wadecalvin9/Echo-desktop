@@ -1,4 +1,4 @@
-﻿use std::collections::HashSet;
+use std::collections::HashSet;
 
 use echo_core::{
     base_version_key, is_preview_title, score_artist_name, score_candidate, ListenerContext,

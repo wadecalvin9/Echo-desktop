@@ -108,6 +108,8 @@ impl std::fmt::Display for AudioQuality {
 pub struct QueueItem {
     pub uid: u64,
     pub track: Track,
+    #[serde(default)]
+    pub is_user_queued: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -128,7 +130,11 @@ impl QueueState {
         self.items.clear();
         for track in tracks {
             let uid = self.alloc_uid();
-            self.items.push(QueueItem { uid, track });
+            self.items.push(QueueItem {
+                uid,
+                track,
+                is_user_queued: false,
+            });
         }
         self.current_index = if self.items.is_empty() {
             None
@@ -139,7 +145,23 @@ impl QueueState {
 
     pub fn push_back(&mut self, track: Track) {
         let uid = self.alloc_uid();
-        self.items.push(QueueItem { uid, track });
+        self.items.push(QueueItem {
+            uid,
+            track,
+            is_user_queued: false,
+        });
+        if self.current_index.is_none() {
+            self.current_index = Some(0);
+        }
+    }
+
+    pub fn push_user(&mut self, track: Track) {
+        let uid = self.alloc_uid();
+        self.items.push(QueueItem {
+            uid,
+            track,
+            is_user_queued: true,
+        });
         if self.current_index.is_none() {
             self.current_index = Some(0);
         }
@@ -151,9 +173,63 @@ impl QueueState {
             Some(idx) => (idx + 1).min(self.items.len()),
             None => 0,
         };
-        self.items.insert(insert_at, QueueItem { uid, track });
+        self.items.insert(
+            insert_at,
+            QueueItem {
+                uid,
+                track,
+                is_user_queued: false,
+            },
+        );
         if self.current_index.is_none() {
             self.current_index = Some(0);
+        }
+    }
+
+    pub fn insert_user_next(&mut self, track: Track) {
+        let uid = self.alloc_uid();
+        let insert_at = match self.current_index {
+            Some(idx) => (idx + 1).min(self.items.len()),
+            None => 0,
+        };
+        self.items.insert(
+            insert_at,
+            QueueItem {
+                uid,
+                track,
+                is_user_queued: true,
+            },
+        );
+        if self.current_index.is_none() {
+            self.current_index = Some(0);
+        }
+    }
+
+    pub fn move_up(&mut self, idx: usize) {
+        if idx == 0 || idx >= self.items.len() {
+            return;
+        }
+        self.items.swap(idx, idx - 1);
+        if let Some(cur) = self.current_index {
+            if cur == idx {
+                self.current_index = Some(idx - 1);
+            } else if cur == idx - 1 {
+                self.current_index = Some(idx);
+            }
+        }
+    }
+
+    pub fn move_down(&mut self, idx: usize) {
+        if idx + 1 >= self.items.len() {
+            return;
+        }
+        self.items.swap(idx, idx + 1);
+        if let Some(cur) = self.current_index {
+            if cur == idx {
+                self.current_index = Some(idx + 1);
+            } else if cur == idx + 1 {
+                self.current_index = Some(idx);
+            }
         }
     }
 

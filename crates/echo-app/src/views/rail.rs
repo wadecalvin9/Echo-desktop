@@ -8,16 +8,17 @@ use iced::widget::{
 };
 use iced::{Color, Element, Font, Length};
 
+use echo_audio::PlaybackStatus;
 use echo_lyrics::{contains_cjk_or_hangul_or_kana, romanize_text};
 
 use crate::icons;
 use crate::theme::{
-    color_from_rgb, elevated_card_style, ghost_row_button_style, glass_panel_style,
+    badge_pill_style, color_from_rgb, elevated_card_style, ghost_row_button_style, glass_panel_style,
     icon_button_style, outlined_pill_button_style, scroll_style, top_pill_button_style,
     with_alpha,
 };
 use crate::{
-    bold, ellipsize, semibold, EchoApp, Message, RightTab,
+    bold, ellipsize, mono, semibold, EchoApp, Message, RightTab,
 };
 
 impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
@@ -326,64 +327,258 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
             }
             RightTab::Queue => {
                 if self.queue.items.is_empty() {
-                    text("Queue is empty.").size(13).color(muted).into()
+                    container(
+                        column![
+                            icons::icon(icons::QUEUE, 32.0, muted),
+                            text("Queue is empty").size(15).font(bold()),
+                            text("Add songs to listen next or queue up an album.").size(12).color(muted),
+                        ]
+                        .spacing(8)
+                        .align_x(Alignment::Center),
+                    )
+                    .width(Length::Fill)
+                    .padding(32)
+                    .into()
                 } else {
-                    let list = self.queue.items.iter().enumerate().fold(
-                        column![].spacing(4),
-                        |col, (idx, item)| {
-                            let is_cur = self.queue.current_index == Some(idx);
-                            col.push(
+                    let mut list = column![].spacing(14);
+
+                    // Section 1: Now Playing
+                    if let Some(cur_idx) = self.queue.current_index {
+                        if let Some(cur) = self.queue.items.get(cur_idx) {
+                            list = list.push(
+                                column![
+                                    text("Now Playing").size(12).font(bold()).color(muted),
+                                    container(
+                                        button(
+                                            row![
+                                                self.artwork_widget(
+                                                    cur.track.thumbnail_url.as_deref(),
+                                                    40.0,
+                                                    false,
+                                                ),
+                                                column![
+                                                    text(ellipsize(&cur.track.title, 26))
+                                                        .size(13)
+                                                        .font(bold())
+                                                        .color(color_from_rgb(p.primary))
+                                                        .wrapping(Wrapping::None),
+                                                    text(ellipsize(&cur.track.artist_display(), 28))
+                                                        .size(11)
+                                                        .color(muted)
+                                                        .wrapping(Wrapping::None),
+                                                ]
+                                                .spacing(2)
+                                                .width(Length::Fill),
+                                                container(icons::icon(icons::VOLUME, 14.0, color_from_rgb(p.primary)))
+                                                    .padding([2, 6]),
+                                            ]
+                                            .spacing(10)
+                                            .align_y(Alignment::Center),
+                                        )
+                                        .width(Length::Fill)
+                                        .padding([6, 8])
+                                        .style(ghost_row_button_style(p, true))
+                                        .on_press(Message::ToggleExpandedPlayer),
+                                    )
+                                    .style(elevated_card_style(p)),
+                                ]
+                                .spacing(6),
+                            );
+                        }
+                    }
+
+                    // Partition remaining tracks into User-Queued vs Context-Queue
+                    let cur_idx = self.queue.current_index.unwrap_or(0);
+                    let mut user_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
+                    let mut context_items: Vec<(usize, &echo_core::QueueItem)> = Vec::new();
+
+                    for (idx, item) in self.queue.items.iter().enumerate() {
+                        if idx > cur_idx {
+                            if item.is_user_queued {
+                                user_items.push((idx, item));
+                            } else {
+                                context_items.push((idx, item));
+                            }
+                        }
+                    }
+
+                    let total_items = self.queue.items.len();
+
+                    // Section 2: Next In Queue (User-Queued)
+                    if !user_items.is_empty() {
+                        let mut user_col = column![
+                            row![
+                                text("Next in Queue").size(12).font(bold()),
+                                horizontal_space(),
+                                text("Added by you").size(10).font(semibold()).color(color_from_rgb(p.primary)),
+                            ]
+                            .align_y(Alignment::Center),
+                        ]
+                        .spacing(4);
+
+                        for (idx, item) in &user_items {
+                            let idx = *idx;
+                            let is_last = idx + 1 >= total_items;
+                            user_col = user_col.push(
                                 row![
                                     button(
                                         row![
                                             self.artwork_widget(
                                                 item.track.thumbnail_url.as_deref(),
                                                 34.0,
-                                                false
+                                                false,
                                             ),
                                             column![
-                                                text(&item.track.title).size(12).color(if is_cur {
-                                                    color_from_rgb(p.primary)
-                                                } else {
-                                                    color_from_rgb(p.text)
-                                                }),
-                                                text(item.track.artist_display())
+                                                text(ellipsize(&item.track.title, 20))
+                                                    .size(12)
+                                                    .font(semibold())
+                                                    .wrapping(Wrapping::None),
+                                                text(ellipsize(&item.track.artist_display(), 22))
                                                     .size(11)
-                                                    .color(muted),
+                                                    .color(muted)
+                                                    .wrapping(Wrapping::None),
                                             ]
+                                            .spacing(2)
                                             .width(Length::Fill),
                                         ]
                                         .spacing(8)
                                         .align_y(Alignment::Center),
                                     )
                                     .width(Length::Fill)
-                                    .padding([5, 6])
-                                    .style(ghost_row_button_style(p, is_cur))
+                                    .padding([4, 6])
+                                    .style(ghost_row_button_style(p, false))
                                     .on_press(Message::QueueJump(idx)),
-                                    button(icons::icon(icons::CLOSE, 13.0, muted))
-                                        .padding(6)
+                                    button(icons::icon(icons::CHEVRON_UP, 13.0, muted))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueMoveUp(idx)),
+                                    button(icons::icon(icons::CHEVRON_DOWN, 13.0, if is_last { with_alpha(muted, 0.4) } else { muted }))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueMoveDown(idx)),
+                                    button(icons::icon(icons::CLOSE, 12.0, muted))
+                                        .padding([4, 4])
                                         .style(icon_button_style(p, false))
                                         .on_press(Message::QueueRemove(idx)),
                                 ]
+                                .spacing(2)
                                 .align_y(Alignment::Center),
+                            );
+                        }
+                        list = list.push(user_col);
+                    }
+
+                    // Section 3: Next From Context (Album, Playlist, Artist, etc.)
+                    if !context_items.is_empty() {
+                        let context_label = self
+                            .queue
+                            .current()
+                            .and_then(|c| c.track.album.as_ref().map(|a| format!("Next from: {}", a.title)))
+                            .unwrap_or_else(|| "Next up".to_string());
+
+                        let mut ctx_col = column![
+                            text(ellipsize(&context_label, 30))
+                                .size(12)
+                                .font(bold())
+                                .color(muted),
+                        ]
+                        .spacing(4);
+
+                        for (idx, item) in &context_items {
+                            let idx = *idx;
+                            let is_last = idx + 1 >= total_items;
+                            ctx_col = ctx_col.push(
+                                row![
+                                    button(
+                                        row![
+                                            self.artwork_widget(
+                                                item.track.thumbnail_url.as_deref(),
+                                                34.0,
+                                                false,
+                                            ),
+                                            column![
+                                                text(ellipsize(&item.track.title, 20))
+                                                    .size(12)
+                                                    .font(semibold())
+                                                    .wrapping(Wrapping::None),
+                                                text(ellipsize(&item.track.artist_display(), 22))
+                                                    .size(11)
+                                                    .color(muted)
+                                                    .wrapping(Wrapping::None),
+                                            ]
+                                            .spacing(2)
+                                            .width(Length::Fill),
+                                        ]
+                                        .spacing(8)
+                                        .align_y(Alignment::Center),
+                                    )
+                                    .width(Length::Fill)
+                                    .padding([4, 6])
+                                    .style(ghost_row_button_style(p, false))
+                                    .on_press(Message::QueueJump(idx)),
+                                    button(icons::icon(icons::CHEVRON_UP, 13.0, muted))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueMoveUp(idx)),
+                                    button(icons::icon(icons::CHEVRON_DOWN, 13.0, if is_last { with_alpha(muted, 0.4) } else { muted }))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueMoveDown(idx)),
+                                    button(icons::icon(icons::CLOSE, 12.0, muted))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueRemove(idx)),
+                                ]
+                                .spacing(2)
+                                .align_y(Alignment::Center),
+                            );
+                        }
+                        list = list.push(ctx_col);
+                    }
+
+                    if user_items.is_empty() && context_items.is_empty() {
+                        list = list.push(
+                            container(
+                                text(if self.settings.auto_load_more {
+                                    "Continuous auto-recommendations active when current track ends."
+                                } else {
+                                    "End of queue. Add tracks to continue playback."
+                                })
+                                .size(12)
+                                .color(muted),
                             )
-                        },
-                    );
+                            .padding(8),
+                        );
+                    }
+
                     column![
                         row![
                             text(format!("{} tracks", self.queue.items.len()))
                                 .size(11)
+                                .font(mono())
                                 .color(muted),
                             horizontal_space(),
+                            button(
+                                row![
+                                    icons::icon(icons::PLUS, 11.0, Color::WHITE),
+                                    text("Save").size(11).font(semibold()).color(Color::WHITE),
+                                ]
+                                .spacing(4)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([4, 8])
+                            .style(top_pill_button_style(p, false))
+                            .on_press(Message::SaveQueueAsPlaylist),
                             button(text("Clear").size(11).color(muted))
-                                .padding([4, 10])
+                                .padding([4, 8])
                                 .style(top_pill_button_style(p, false))
                                 .on_press(Message::QueueClear),
                         ]
+                        .spacing(6)
                         .align_y(Alignment::Center),
                         self.vscroll(list),
                     ]
-                    .spacing(6)
+                    .spacing(8)
                     .into()
                 }
             }
@@ -398,22 +593,131 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
             .into()
     }
 
+    pub(crate) fn view_lyrics_fallback_visualizer(&self, is_cinema: bool, base_size: u16) -> Element<'_, Message> {
+        let p = self.palette;
+        let muted = color_from_rgb(p.text_muted);
+        let accent = color_from_rgb(p.primary);
+        let playing = matches!(self.status, PlaybackStatus::Playing);
+
+        let mut visualizer_bars = row![].spacing(if is_cinema { 6 } else { 4 }).align_y(Alignment::End);
+        let max_height = if is_cinema { 120.0 } else { 46.0 };
+        let min_height = if is_cinema { 8.0 } else { 4.0 };
+
+        for (i, &band) in self.spectrum_bands.iter().enumerate() {
+            let amp = if playing {
+                let wave = ((self.anim_phase * 2.2 + i as f32 * 0.75).sin() * 0.5 + 0.5) * 0.28;
+                (band + wave).clamp(0.08, 1.0)
+            } else {
+                0.10
+            };
+            let bar_h = (max_height * amp).max(min_height);
+            let bar_color = if i % 2 == 0 {
+                accent
+            } else {
+                with_alpha(Color::WHITE, 0.70 + 0.30 * amp)
+            };
+            visualizer_bars = visualizer_bars.push(
+                container(horizontal_space())
+                    .width(if is_cinema { 8 } else { 4 })
+                    .height(bar_h)
+                    .style(move |_| container::Style {
+                        background: Some(iced::Background::Color(bar_color)),
+                        border: iced::Border {
+                            radius: 3.0.into(),
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    }),
+            );
+        }
+
+        if is_cinema {
+            let track_title = self.queue.current().map(|c| c.track.title.as_str()).unwrap_or("Playing");
+            let track_artist = self.queue.current().map(|c| c.track.artist_display()).unwrap_or_default();
+
+            container(
+                column![
+                    container(visualizer_bars)
+                        .height(130)
+                        .align_y(iced::alignment::Vertical::Bottom),
+                    vertical_space().height(16),
+                    container(
+                        row![
+                            icons::icon(icons::DISC, 14.0, accent),
+                            text("Audio Visualizer Active").size(12).font(bold()).color(Color::WHITE),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([5, 14])
+                    .style(badge_pill_style(p)),
+                    vertical_space().height(4),
+                    text(track_title)
+                        .size(24)
+                        .font(bold())
+                        .wrapping(Wrapping::None),
+                    text(track_artist)
+                        .size(15)
+                        .color(muted)
+                        .wrapping(Wrapping::None),
+                    vertical_space().height(8),
+                    text("No synchronized lyrics loaded for this track.")
+                        .size(13)
+                        .color(with_alpha(muted, 0.8)),
+                ]
+                .spacing(4)
+                .align_x(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .align_x(iced::alignment::Horizontal::Center)
+            .align_y(iced::alignment::Vertical::Center)
+            .into()
+        } else {
+            container(
+                column![
+                    container(visualizer_bars)
+                        .height(55)
+                        .align_y(iced::alignment::Vertical::Bottom),
+                    vertical_space().height(8),
+                    text("Visualizer Active").size(13).font(bold()),
+                    text("No synced lyrics available.").size(base_size).color(muted),
+                ]
+                .spacing(4)
+                .align_x(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding(24)
+            .align_x(iced::alignment::Horizontal::Center)
+            .into()
+        }
+    }
+
     pub(crate) fn view_lyrics_inner(&self, active_size: u16, base_size: u16) -> Element<'_, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
+        let is_cinema = active_size >= 24;
 
         if self.lyrics_loading {
-            return text("Fetching lyrics...").size(base_size).color(muted).into();
+            return container(
+                column![
+                    icons::icon(icons::LYRICS, if is_cinema { 32.0 } else { 20.0 }, color_from_rgb(p.primary)),
+                    text("Fetching synchronized lyrics...").size(base_size).color(muted),
+                ]
+                .spacing(8)
+                .align_x(Alignment::Center),
+            )
+            .width(Length::Fill)
+            .padding(if is_cinema { 40 } else { 20 })
+            .align_x(iced::alignment::Horizontal::Center)
+            .into();
         }
 
         let Some(res) = &self.active_lyrics else {
-            return text("No lyrics loaded for the current track.")
-                .size(base_size)
-                .color(muted)
-                .into();
+            return self.view_lyrics_fallback_visualizer(is_cinema, base_size);
         };
 
-        let rom_btn = button(text("Romanize").size(11))
+        let rom_btn = button(text("Romanize").size(11).wrapping(Wrapping::None))
             .padding([3, 10])
             .style(top_pill_button_style(p, self.settings.romanize_lyrics))
             .on_press(Message::ToggleRomanizeLyrics);
@@ -421,7 +725,7 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
         let share_btn = button(
             row![
                 icons::icon(icons::SHARE, 12.0, muted),
-                text("Card").size(11).color(muted),
+                text("Card").size(11).wrapping(Wrapping::None).color(muted),
             ]
             .spacing(4)
             .align_y(Alignment::Center),
@@ -432,15 +736,15 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
 
         let offset_sec = self.settings.lyrics_offset_ms as f32 / 1000.0;
         let sync_stepper = row![
-            button(text("–0.5s").size(10))
+            button(text("–0.5s").size(10).wrapping(Wrapping::None))
                 .padding([3, 6])
                 .style(top_pill_button_style(p, false))
                 .on_press(Message::AdjustLyricsOffset(-500)),
-            button(text(if self.settings.lyrics_offset_ms == 0 { "Sync: 0.0s".to_string() } else { format!("Sync: {:+.1}s", offset_sec) }).size(10))
+            button(text(if self.settings.lyrics_offset_ms == 0 { "Sync: 0.0s".to_string() } else { format!("Sync: {:+.1}s", offset_sec) }).size(10).wrapping(Wrapping::None))
                 .padding([3, 6])
                 .style(top_pill_button_style(p, self.settings.lyrics_offset_ms != 0))
                 .on_press(Message::ResetLyricsOffset),
-            button(text("+0.5s").size(10))
+            button(text("+0.5s").size(10).wrapping(Wrapping::None))
                 .padding([3, 6])
                 .style(top_pill_button_style(p, false))
                 .on_press(Message::AdjustLyricsOffset(500)),
@@ -448,20 +752,18 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
         .spacing(2)
         .align_y(Alignment::Center);
 
-        let is_cinema = active_size >= 24;
-
         if !res.synced.is_empty() {
             let calibrated_ms = (self.position_ms as i64 + self.settings.lyrics_offset_ms).max(0) as u64;
             let active_idx = res.active_index(calibrated_ms);
             let top_pad = if is_cinema {
-                (self.window_size.1 * 0.32).clamp(180.0, 260.0)
+                (self.window_size.1 * 0.22).clamp(70.0, 160.0)
             } else {
-                110.0
+                80.0
             };
             let bottom_pad = if is_cinema {
-                (self.window_size.1 * 0.48).clamp(260.0, 420.0)
+                (self.window_size.1 * 0.32).clamp(120.0, 240.0)
             } else {
-                180.0
+                120.0
             };
 
             let mut lines_col = column![vertical_space().height(top_pad)]
@@ -499,17 +801,24 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                         let mut spans = Vec::with_capacity(line.words.len() * 2);
                         for (wi, w) in line.words.iter().enumerate() {
                             let sung = calibrated_ms >= w.time_ms;
-                            let w_color = if sung {
+                            let is_current = sung && line.words.get(wi + 1).map(|nw| calibrated_ms < nw.time_ms).unwrap_or(true);
+                            let w_color = if is_current {
                                 Color::WHITE
+                            } else if sung {
+                                Color::from_rgba(1.0, 1.0, 1.0, 0.92)
                             } else {
-                                Color::from_rgba(1.0, 1.0, 1.0, 0.40)
+                                Color::from_rgba(1.0, 1.0, 1.0, 0.36)
                             };
                             let piece = if w.ends_with_space && wi + 1 < line.words.len() {
                                 format!("{} ", w.text)
                             } else {
                                 w.text.clone()
                             };
-                            spans.push(span::<Message, Font>(piece).color(w_color));
+                            let mut s = span::<Message, Font>(piece).color(w_color);
+                            if is_current {
+                                s = s.font(bold());
+                            }
+                            spans.push(s);
                         }
                         rich_text(spans).size(active_size).font(bold()).into()
                     } else {
@@ -548,22 +857,37 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
 
             lines_col = lines_col.push(vertical_space().height(bottom_pad));
 
+            let controls = row![sync_stepper, share_btn, rom_btn]
+                .spacing(4)
+                .align_y(Alignment::Center);
+
+            let header_bar = row![
+                text(format!("Synced Lyrics • {}", res.source.label()))
+                    .size(11)
+                    .wrapping(Wrapping::None)
+                    .color(if is_cinema {
+                        Color::from_rgba(1.0, 1.0, 1.0, 0.65)
+                    } else {
+                        muted
+                    }),
+                horizontal_space(),
+                controls,
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center);
+
+            let header_widget: Element<'_, Message> = if is_cinema {
+                scrollable(header_bar)
+                    .direction(scrollable::Direction::Horizontal(
+                        scrollable::Scrollbar::new().width(0).scroller_width(0).margin(0),
+                    ))
+                    .into()
+            } else {
+                header_bar.into()
+            };
+
             column![
-                row![
-                    text(format!("Synced Lyrics • {}", res.source.label()))
-                        .size(12)
-                        .color(if is_cinema {
-                            Color::from_rgba(1.0, 1.0, 1.0, 0.65)
-                        } else {
-                            muted
-                        }),
-                    horizontal_space(),
-                    sync_stepper,
-                    share_btn,
-                    rom_btn,
-                ]
-                .spacing(6)
-                .align_y(Alignment::Center),
+                header_widget,
                 scrollable(lines_col)
                     .id(self.lyrics_scroll_id.clone())
                     .direction(scrollable::Direction::Vertical(
@@ -582,15 +906,19 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
             } else {
                 plain.clone()
             };
+            let plain_header = row![
+                text(format!("Lyrics • {}", res.source.label()))
+                    .size(11)
+                    .wrapping(Wrapping::None)
+                    .color(muted),
+                horizontal_space(),
+                rom_btn,
+            ]
+            .spacing(6)
+            .align_y(Alignment::Center);
+
             column![
-                row![
-                    text(format!("Lyrics • {}", res.source.label()))
-                        .size(12)
-                        .color(muted),
-                    horizontal_space(),
-                    rom_btn,
-                ]
-                .align_y(Alignment::Center),
+                plain_header,
                 self.vscroll(
                     container(text(body_text).size(base_size).color(Color::from_rgba(1.0, 1.0, 1.0, 0.85)))
                         .padding(if is_cinema { [16, 12] } else { [4, 2] })

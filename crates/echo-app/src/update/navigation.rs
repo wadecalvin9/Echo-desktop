@@ -7,6 +7,7 @@ use echo_core::{
 };
 
 use crate::smtc;
+use crate::tray;
 use crate::types::*;
 use crate::EchoApp;
 
@@ -62,6 +63,10 @@ impl EchoApp {
                 }
                 self.library_tab = lt;
                 self.refresh_db_views();
+                Task::none()
+            }
+            Message::PlaylistFilterChanged(q) => {
+                self.playlist_filter_query = q;
                 Task::none()
             }
             Message::LibraryFilterSelected(f) => {
@@ -162,6 +167,10 @@ impl EchoApp {
                 }
                 Task::none()
             }
+            Message::ToggleStreamInspector => {
+                self.show_stream_inspector = !self.show_stream_inspector;
+                Task::none()
+            }
             Message::ToggleMiniPlayer => {
                 let next = !self.mini_player;
                 if next {
@@ -229,7 +238,10 @@ impl EchoApp {
                     Key::Named(Named::MediaTrackNext) => return self.update(Message::NextTrack),
                     Key::Named(Named::MediaTrackPrevious) => return self.update(Message::PrevTrack),
                     Key::Named(Named::Escape) => {
-                        if self.mini_player {
+                        if self.show_stream_inspector {
+                            self.show_stream_inspector = false;
+                            return Task::none();
+                        } else if self.mini_player {
                             return self.update(Message::ToggleMiniPlayer);
                         } else if self.track_menu.is_some() {
                             self.track_menu = None;
@@ -296,6 +308,9 @@ impl EchoApp {
                 if self.smtc.is_none() {
                     self.smtc = smtc::SmtcBridge::new(hwnd);
                 }
+                if self.tray.is_none() {
+                    self.tray = Some(tray::TrayBridge::new(hwnd));
+                }
                 Task::none()
             }
             Message::DragWindow => {
@@ -338,14 +353,26 @@ impl EchoApp {
                 Task::none()
             }
             Message::CloseWindow => {
-                self.flush_active_play_duration();
-                if let Some(id) = self.main_window_id {
-                    iced::window::close(id)
+                if self.queue.current().is_some() {
+                    self.set_toast("Playing in system tray • Right-click tray icon for controls");
+                    if let Some(id) = self.main_window_id {
+                        iced::window::minimize(id, true)
+                    } else {
+                        iced::window::get_oldest().then(|opt| match opt {
+                            Some(id) => iced::window::minimize(id, true),
+                            None => Task::none(),
+                        })
+                    }
                 } else {
-                    iced::window::get_oldest().then(|opt| match opt {
-                        Some(id) => iced::window::close(id),
-                        None => Task::none(),
-                    })
+                    self.flush_active_play_duration();
+                    if let Some(id) = self.main_window_id {
+                        iced::window::close(id)
+                    } else {
+                        iced::window::get_oldest().then(|opt| match opt {
+                            Some(id) => iced::window::close(id),
+                            None => Task::none(),
+                        })
+                    }
                 }
             }
             Message::ToggleCastModal => {

@@ -527,6 +527,7 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
     pub(crate) fn clear_detail(&mut self) {
         self.viewing_detail = None;
         self.detail_loading = None;
+        self.playlist_filter_query.clear();
     }
 
     pub(crate) fn active_playlist_id(&self) -> Option<&str> {

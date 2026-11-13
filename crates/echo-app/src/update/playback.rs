@@ -11,6 +11,7 @@ use echo_youtube::{
 };
 
 use crate::smtc;
+use crate::tray;
 use crate::types::*;
 use crate::EchoApp;
 
@@ -91,6 +92,51 @@ impl EchoApp {
                             }
                             smtc::SmtcAction::SetPositionMs(ms) => {
                                 extra_tasks.push(self.update(Message::SeekToMs(ms)));
+                            }
+                        }
+                    }
+                }
+
+                if let Some(ref mut tray) = self.tray {
+                    let actions = tray.poll_actions();
+                    let cur = self.queue.current();
+                    let is_playing = matches!(self.status, PlaybackStatus::Playing);
+                    tray.sync(
+                        cur.map(|c| c.track.title.as_str()),
+                        cur.map(|c| c.track.artist_display()).as_deref(),
+                        is_playing,
+                    );
+                    for act in actions {
+                        match act {
+                            tray::TrayAction::PlayPause => {
+                                extra_tasks.push(self.update(Message::TogglePlayPause));
+                            }
+                            tray::TrayAction::Next => {
+                                extra_tasks.push(self.update(Message::NextTrack));
+                            }
+                            tray::TrayAction::Previous => {
+                                extra_tasks.push(self.update(Message::PrevTrack));
+                            }
+                            tray::TrayAction::RestoreWindow => {
+                                if let Some(id) = self.main_window_id {
+                                    extra_tasks.push(iced::window::minimize(id, false));
+                                } else {
+                                    extra_tasks.push(iced::window::get_oldest().then(|opt| match opt {
+                                        Some(id) => iced::window::minimize(id, false),
+                                        None => Task::none(),
+                                    }));
+                                }
+                            }
+                            tray::TrayAction::Exit => {
+                                self.flush_active_play_duration();
+                                if let Some(id) = self.main_window_id {
+                                    extra_tasks.push(iced::window::close(id));
+                                } else {
+                                    extra_tasks.push(iced::window::get_oldest().then(|opt| match opt {
+                                        Some(id) => iced::window::close(id),
+                                        None => Task::none(),
+                                    }));
+                                }
                             }
                         }
                     }
@@ -315,7 +361,7 @@ impl EchoApp {
                 self.track_menu = None;
                 let was_empty = self.queue.current().is_none();
                 let thumb = t.thumbnail_url.clone();
-                self.queue.insert_next(t);
+                self.queue.insert_user_next(t);
                 if was_empty {
                     self.start_playing_current()
                 } else {
@@ -327,7 +373,7 @@ impl EchoApp {
                 self.track_menu = None;
                 let was_empty = self.queue.current().is_none();
                 let thumb = t.thumbnail_url.clone();
-                self.queue.push_back(t);
+                self.queue.push_user(t);
                 if was_empty {
                     self.start_playing_current()
                 } else {
@@ -344,6 +390,30 @@ impl EchoApp {
             }
             Message::QueueRemove(idx) => {
                 self.queue.remove_at(idx);
+                Task::none()
+            }
+            Message::QueueMoveUp(idx) => {
+                self.queue.move_up(idx);
+                Task::none()
+            }
+            Message::QueueMoveDown(idx) => {
+                self.queue.move_down(idx);
+                Task::none()
+            }
+            Message::SaveQueueAsPlaylist => {
+                if self.queue.items.is_empty() {
+                    self.set_toast("Queue is empty");
+                    return Task::none();
+                }
+                let pl_id = format!("local_queue_{}", chrono::Utc::now().timestamp_millis());
+                let pl_name = format!("Queue ({})", chrono::Local::now().format("%b %d, %H:%M"));
+                if self.db.create_playlist(&pl_id, &pl_name).is_ok() {
+                    for item in &self.queue.items {
+                        let _ = self.db.add_to_playlist(&pl_id, &item.track);
+                    }
+                    self.refresh_db_views();
+                    self.set_toast(format!("Saved {} tracks as playlist: {}", self.queue.items.len(), pl_name));
+                }
                 Task::none()
             }
             Message::QueueClear => {

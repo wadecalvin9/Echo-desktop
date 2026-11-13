@@ -1,4 +1,4 @@
-﻿pub mod components;
+pub mod components;
 pub mod discover;
 pub mod library;
 pub mod navigation;

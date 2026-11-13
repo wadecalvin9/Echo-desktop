@@ -537,7 +537,10 @@ pub enum Message {
     QueueAddBack(Track),
     QueueJump(usize),
     QueueRemove(usize),
+    QueueMoveUp(usize),
+    QueueMoveDown(usize),
     QueueClear,
+    SaveQueueAsPlaylist,
     TogglePlayPause,
     NextTrack,
     PrevTrack,
@@ -558,6 +561,7 @@ pub enum Message {
     // UI Overlays & Artwork
     ToggleExpandedPlayer,
     ToggleMiniPlayer,
+    ToggleStreamInspector,
     ArtworkLoaded {
         url: String,
         rounded: Option<image::Handle>,
@@ -574,6 +578,7 @@ pub enum Message {
     SeekToMs(u64),
 
     // Library & Playlists
+    PlaylistFilterChanged(String),
     NewPlaylistNameChanged(String),
     CreatePlaylist,
     DeletePlaylist(String),
