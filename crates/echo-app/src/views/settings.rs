@@ -952,9 +952,44 @@ impl EchoApp {    fn settings_row<'a>(
                     Some(yt_status_badge.into()),
                 ),
                 row_divider(),
+                container(
+                    row![
+                        column![
+                            text(if has_cookie { "Google Account Connected" } else { "Automatic 1-Click Sign-In" })
+                                .size(13)
+                                .font(bold()),
+                            text(if has_cookie {
+                                "Your Google session is active. Re-sign in anytime to refresh authentication."
+                            } else {
+                                "Opens Google's sign-in page in a secure window and captures your session automatically."
+                            })
+                            .size(11)
+                            .color(muted),
+                        ]
+                        .spacing(2),
+                        horizontal_space(),
+                        button(
+                            row![
+                                icons::icon(icons::USER, 13.0, Color::BLACK),
+                                text(if has_cookie { "Reconnect Account" } else { "Sign In with Google" })
+                                    .size(12)
+                                    .font(bold())
+                                    .color(Color::BLACK),
+                            ]
+                            .spacing(6)
+                            .align_y(Alignment::Center)
+                        )
+                        .padding([8, 16])
+                        .style(top_pill_button_style(p, true))
+                        .on_press(Message::StartGoogleSignIn),
+                    ]
+                    .align_y(Alignment::Center)
+                )
+                .padding([12, 14])
+                .style(badge_pill_style(p)),
                 column![
                     row![
-                        text("YouTube Music Session Cookie Header").size(13).font(bold()),
+                        text("Manual Session Cookie Header (Advanced)").size(13).font(bold()),
                         horizontal_space(),
                         if has_cookie {
                             text("Cookie active (stored locally)").size(11).color(color_from_rgb(p.primary))

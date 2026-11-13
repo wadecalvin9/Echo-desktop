@@ -1,0 +1,10 @@
+[package]
+name = "echo-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+tao = "0.37"
+wry = "0.57"
+

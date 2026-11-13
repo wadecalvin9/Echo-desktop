@@ -619,7 +619,9 @@ pub enum Message {
     DisconnectLastFm,
     ToggleLastFmScrobbling(bool),
 
-    // YouTube Account Sync
+    // YouTube Account Sync & Google Sign-In
+    StartGoogleSignIn,
+    GoogleSignInFinished(Result<String, String>),
     YouTubeCookieChanged(String),
     SaveYouTubeCookie,
     ClearYouTubeCookie,

@@ -1,3 +1,4 @@
+mod auth;
 mod dialogs;
 mod icons;
 mod ranking;
@@ -579,6 +580,8 @@ impl EchoApp {
             | Message::ToggleBetterLyrics(..)
             | Message::ToggleRomanizeLyrics
             | Message::ToggleAutoLoadMore(..)
+            | Message::StartGoogleSignIn
+            | Message::GoogleSignInFinished(..)
             | Message::YouTubeCookieChanged(..)
             | Message::SaveYouTubeCookie
             | Message::ClearYouTubeCookie

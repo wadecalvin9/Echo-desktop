@@ -8,6 +8,7 @@ members = [
     "crates/echo-youtube",
     "crates/echo-audio",
     "crates/echo-app",
+    "crates/echo-auth",
 ]
 
 [workspace.package]

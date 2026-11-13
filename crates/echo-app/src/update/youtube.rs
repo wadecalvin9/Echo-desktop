@@ -715,6 +715,37 @@ impl EchoApp {
                 }
                 Task::none()
             }
+            Message::StartGoogleSignIn => {
+                self.account_sync_status = Some("Opening Google sign-in window...".to_string());
+                Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || {
+                            crate::auth::launch_google_signin_webview()
+                        })
+                        .await
+                        .map_err(|e| format!("Task execution error: {e}"))
+                        .and_then(|r| r)
+                    },
+                    Message::GoogleSignInFinished,
+                )
+            }
+            Message::GoogleSignInFinished(result) => {
+                match result {
+                    Ok(cookie_header) => {
+                        self.yt_cookie_input = cookie_header.clone();
+                        self.settings.youtube_cookie = Some(cookie_header.clone());
+                        self.yt.set_cookie(Some(cookie_header));
+                        let _ = self.settings.save();
+                        self.account_sync_status =
+                            Some("Connected! Syncing your library & playlists...".to_string());
+                        self.update(Message::SyncYouTubeAccount)
+                    }
+                    Err(err) => {
+                        self.account_sync_status = Some(format!("{err}"));
+                        Task::none()
+                    }
+                }
+            }
             Message::YouTubeCookieChanged(c) => {
                 self.yt_cookie_input = c;
                 Task::none()
