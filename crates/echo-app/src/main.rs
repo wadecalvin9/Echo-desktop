@@ -3,6 +3,7 @@ mod dialogs;
 mod icons;
 mod ranking;
 mod smtc;
+mod taskbar;
 mod tasks;
 mod theme;
 mod tray;
@@ -95,6 +96,7 @@ pub(crate) struct EchoApp {
     position_ms: u64,
     duration_ms: u64,
     seeking_ms: Option<u64>,
+    stream_retry_count: usize,
     last_finished_seq: u64,
     last_tick: Instant,
     sleep_timer: SleepTimerState,
@@ -177,6 +179,7 @@ pub(crate) struct EchoApp {
     cover_bytes: HashMap<String, Vec<u8>>,
     cover_tints: HashMap<String, RgbColor>,
     loading_covers: HashSet<String>,
+    cover_order: std::collections::VecDeque<String>,
     shelf_offsets: HashMap<String, usize>,
     track_menu: Option<Track>,
     anim_phase: f32,
@@ -203,6 +206,7 @@ pub(crate) struct EchoApp {
     window_size: (f32, f32),
     window_maximized: bool,
     smtc: Option<smtc::SmtcBridge>,
+    taskbar: Option<taskbar::TaskbarProgress>,
     smtc_requested: bool,
     tray: Option<tray::TrayBridge>,
     listener_ctx: ListenerContext,
@@ -288,6 +292,7 @@ impl EchoApp {
             position_ms: 0,
             duration_ms: 0,
             seeking_ms: None,
+            stream_retry_count: 0,
             last_finished_seq: 0,
             last_tick: Instant::now(),
             sleep_timer: SleepTimerState::Off,
@@ -360,6 +365,7 @@ impl EchoApp {
             cover_bytes: HashMap::new(),
             cover_tints: HashMap::new(),
             loading_covers: HashSet::new(),
+            cover_order: std::collections::VecDeque::new(),
             shelf_offsets: HashMap::new(),
             track_menu: None,
             anim_phase: 0.0,
@@ -380,6 +386,7 @@ impl EchoApp {
             window_size: (1360.0, 840.0),
             window_maximized: false,
             smtc: None,
+            taskbar: None,
             smtc_requested: false,
             tray: None,
             listener_ctx: ListenerContext::default(),
@@ -422,6 +429,9 @@ impl EchoApp {
             )
             .collect();
         let mut tasks = vec![app.load_home_task()];
+        if app.yt.has_cookie() {
+            tasks.push(app.update(Message::SyncYouTubeAccount));
+        }
         if app.settings.auto_scan_local_on_startup {
             tasks.push(app.update(Message::ScanLocalMedia));
         }
@@ -529,6 +539,7 @@ impl EchoApp {
             | Message::CloseWindow
             | Message::NavigateBackDetail
             | Message::NavigateForwardDetail
+            | Message::OpenUrl(..)
             | Message::ToggleCastModal
             | Message::ScanCastDevices
             | Message::CastDevicesFound(..)
@@ -601,9 +612,9 @@ impl EchoApp {
         if self.left_collapsed {
             72.0
         } else if self.window_size.0 < 1200.0 {
-            244.0
+            260.0
         } else {
-            290.0
+            300.0
         }
     }
 
@@ -628,8 +639,8 @@ impl EchoApp {
     }
 
     fn search_width(&self) -> f32 {
-        let max_w = if self.window_size.0 >= 1400.0 { 440.0 } else { 380.0 };
-        (self.window_size.0 * 0.28).clamp(220.0, max_w)
+        let max_w = if self.window_size.0 >= 1400.0 { 480.0 } else { 420.0 };
+        (self.window_size.0 * 0.30).clamp(280.0, max_w)
     }
 
     fn show_album_column(&self) -> bool {

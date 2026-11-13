@@ -4,7 +4,7 @@
 //! and Win32 message loop run in complete process isolation, guaranteeing zero
 //! symbol or window hook conflicts with Iced/winit.
 
-pub fn launch_google_signin_webview() -> Result<String, String> {
+pub fn launch_google_signin_webview(clear_session: bool) -> Result<String, String> {
     let mut exe_path = std::env::current_exe()
         .map_err(|e| format!("Failed to get current executable path: {e}"))?;
     exe_path.set_file_name("echo-auth.exe");
@@ -25,7 +25,12 @@ pub fn launch_google_signin_webview() -> Result<String, String> {
         }
     }
 
-    let output = std::process::Command::new(&exe_path)
+    let mut cmd = std::process::Command::new(&exe_path);
+    if clear_session {
+        cmd.arg("--clear-session");
+    }
+
+    let output = cmd
         .output()
         .map_err(|e| format!("Failed to launch sign-in helper: {e}"))?;
 

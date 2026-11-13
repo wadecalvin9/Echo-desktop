@@ -101,6 +101,7 @@ struct SharedState {
     out_rate: AtomicU64,
     out_channels: AtomicU64,
     spectrum_packed: AtomicU64,
+    stream_error: AtomicBool,
     ring: Mutex<VecDeque<f32>>,
 }
 
@@ -128,6 +129,7 @@ impl SharedState {
             out_rate: AtomicU64::new(48_000),
             out_channels: AtomicU64::new(2),
             spectrum_packed: AtomicU64::new(0),
+            stream_error: AtomicBool::new(false),
             ring: Mutex::new(VecDeque::with_capacity(48_000 * 4)),
         }
     }
@@ -428,11 +430,17 @@ fn build_output_stream(
     let fmt = cfg.sample_format();
     let stream_cfg = cfg.into();
     let stream_shared = Arc::clone(shared);
+    let err_shared_f32 = Arc::clone(shared);
+    let err_shared_i16 = Arc::clone(shared);
+    let err_shared_u16 = Arc::clone(shared);
     let stream = match fmt {
         SampleFormat::F32 => dev.build_output_stream(
             &stream_cfg,
             move |data: &mut [f32], _| fill_output_f32(&stream_shared, data),
-            |err| tracing::warn!("cpal output error: {err}"),
+            move |err| {
+                tracing::warn!("cpal output error: {err}");
+                err_shared_f32.stream_error.store(true, Ordering::Relaxed);
+            },
             None,
         ),
         SampleFormat::I16 => dev.build_output_stream(
@@ -444,7 +452,10 @@ fn build_output_stream(
                     *dst = (src.clamp(-1.0, 1.0) * 32767.0) as i16;
                 }
             },
-            |err| tracing::warn!("cpal output error: {err}"),
+            move |err| {
+                tracing::warn!("cpal output error: {err}");
+                err_shared_i16.stream_error.store(true, Ordering::Relaxed);
+            },
             None,
         ),
         SampleFormat::U16 => dev.build_output_stream(
@@ -456,7 +467,10 @@ fn build_output_stream(
                     *dst = ((src.clamp(-1.0, 1.0) * 32767.0) + 32768.0) as u16;
                 }
             },
-            |err| tracing::warn!("cpal output error: {err}"),
+            move |err| {
+                tracing::warn!("cpal output error: {err}");
+                err_shared_u16.stream_error.store(true, Ordering::Relaxed);
+            },
             None,
         ),
         other => {
@@ -475,8 +489,8 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
         match build_output_stream(&host, None, &shared) {
             Ok((r, ch, s)) => (r, ch, Some(s)),
             Err(e) => {
-                *shared.status.lock().expect("status") = PlaybackStatus::Error(e);
-                return;
+                tracing::warn!("Initial audio stream setup failed: {e}; will retry on worker tick");
+                (48_000, 2, None)
             }
         };
 
@@ -490,6 +504,24 @@ fn audio_worker_loop(rx: mpsc::Receiver<Command>, shared: Arc<SharedState>) {
     let mut spatial = SpatialProcessor::new(out_rate, init_spatial);
 
     loop {
+        // Recover output stream if device was disconnected or initial build was empty
+        if shared.stream_error.swap(false, Ordering::Relaxed) || _stream.is_none() {
+            if let Ok((r, ch, s)) = build_output_stream(&host, None, &shared) {
+                out_rate = r;
+                out_channels = ch;
+                _stream = Some(s);
+                shared.out_rate.store(out_rate as u64, Ordering::Relaxed);
+                shared.out_channels.store(out_channels as u64, Ordering::Relaxed);
+                max_ring_samples = (out_rate as usize) * out_channels / 2;
+                let (preset, spatial_mode) = *shared.dsp_config.lock().expect("dsp_config");
+                equalizer = Equalizer::new(out_rate, out_channels, preset);
+                spatial = SpatialProcessor::new(out_rate, spatial_mode);
+                tracing::info!("Audio device recovered on default endpoint: {out_rate}Hz, {out_channels}ch");
+            } else if _stream.is_none() {
+                std::thread::sleep(Duration::from_millis(60));
+            }
+        }
+
         // Drain pending commands without blocking if actively decoding.
         let cmd_opt = if active.is_some() && !shared.paused.load(Ordering::Relaxed) {
             rx.try_recv().ok()

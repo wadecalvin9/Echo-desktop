@@ -171,13 +171,19 @@ pub fn parse_cookie_map(cookie: &str) -> HashMap<String, String> {
         .collect()
 }
 
+pub fn extract_sapisid_from_cookie_map(map: &HashMap<String, String>) -> Option<&str> {
+    map.get("SAPISID")
+        .or_else(|| map.get("__Secure-3PAPISID"))
+        .or_else(|| map.get("__Secure-1PAPISID"))
+        .or_else(|| map.get("APISID"))
+        .map(|s| s.trim().trim_matches('"'))
+}
+
 pub fn sapisid_auth_header(sapisid: &str, unix_secs: i64) -> String {
     let input = format!("{unix_secs} {sapisid} {ORIGIN_YOUTUBE_MUSIC}");
     let mut hasher = Sha1::new();
     hasher.update(input.as_bytes());
     let digest: String = hasher.finalize().iter().map(|b| format!("{b:02x}")).collect();
-    format!(
-        "SAPISIDHASH {unix_secs}_{digest} SAPISID1PHASH {unix_secs}_{digest} SAPISID3PHASH {unix_secs}_{digest}"
-    )
+    format!("SAPISIDHASH {unix_secs}_{digest} SAPISID1PHASH {unix_secs}_{digest} SAPISID3PHASH {unix_secs}_{digest}")
 }
 

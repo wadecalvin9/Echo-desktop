@@ -145,9 +145,30 @@ impl EchoApp {
                 let snap = self.audio.snapshot();
                 if let PlaybackStatus::Error(ref err) = snap.status {
                     if !matches!(&self.status, PlaybackStatus::Error(prev) if prev == err) {
-                        self.set_toast(format!("Audio error: {err}"));
                         if let Some(cur) = self.queue.current() {
                             self.yt.invalidate_stream(&cur.track.id);
+                            let is_stream_err = err.contains("403")
+                                || err.contains("Forbidden")
+                                || err.contains("stream open failed")
+                                || err.contains("probe failed")
+                                || err.contains("source read error")
+                                || err.contains("broken pipe")
+                                || err.contains("connection reset");
+                            if !cur.track.is_local && is_stream_err && self.stream_retry_count < 2 {
+                                self.stream_retry_count += 1;
+                                let resume_pos = if self.position_ms > 0 {
+                                    Some(self.position_ms)
+                                } else {
+                                    self.seeking_ms
+                                };
+                                self.seeking_ms = resume_pos;
+                                self.set_toast(format!("Stream expired — refreshing audio (attempt {}/2)...", self.stream_retry_count));
+                                extra_tasks.push(self.start_playing_current());
+                            } else {
+                                self.set_toast(format!("Audio error: {err}"));
+                            }
+                        } else {
+                            self.set_toast(format!("Audio error: {err}"));
                         }
                     }
                 }
@@ -164,10 +185,17 @@ impl EchoApp {
                     self.duration_ms = snap.duration_ms;
                 }
 
+                if let Some(ref mut taskbar) = self.taskbar {
+                    let is_playing = matches!(self.status, PlaybackStatus::Playing);
+                    let is_paused = matches!(self.status, PlaybackStatus::Paused);
+                    taskbar.update(is_playing, is_paused, self.position_ms, self.duration_ms);
+                }
+
                 // Auto-scroll synced lyrics when the active line advances.
                 let scroll_task = self.sync_lyrics_scroll();
 
                 if matches!(self.status, PlaybackStatus::Playing) {
+                    self.stream_retry_count = 0;
                     if let Some(tr) = self.scrobble_tracker.as_mut() {
                         tr.accumulated_ms += dt_ms.min(1000);
                         let dur = tr
@@ -306,6 +334,7 @@ impl EchoApp {
                 Task::batch(extra_tasks)
             }
             Message::PlayTrack(track) => {
+                self.stream_retry_count = 0;
                 self.queue.replace_with(vec![track.clone()], 0);
                 let mut tasks = vec![self.start_playing_current()];
                 if self.settings.auto_load_more && !track.is_local {
@@ -354,6 +383,7 @@ impl EchoApp {
                 Task::batch(tasks)
             }
             Message::PlayTracks(tracks, idx) => {
+                self.stream_retry_count = 0;
                 self.queue.replace_with(tracks, idx);
                 self.start_playing_current()
             }

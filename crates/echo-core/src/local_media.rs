@@ -73,8 +73,12 @@ pub fn scan_local_folders(cfg: &LocalMediaScanConfig) -> Vec<Track> {
     let mut tracks = Vec::new();
     let mut dedup_keys = HashSet::new();
 
-    for path in files {
-        let Some(track) = read_local_track(&path, cfg) else {
+    for (idx, path) in files.iter().enumerate() {
+        if idx > 0 && idx % 250 == 0 {
+            // Yield thread control periodically to keep the runtime responsive
+            std::thread::yield_now();
+        }
+        let Some(track) = read_local_track(path, cfg) else {
             continue;
         };
         let dedup = match cfg.sensitivity {

@@ -17,7 +17,8 @@ use crate::theme::{
     color_from_rgb, divider_style, dock_play_button_style, expanded_stage_style,
     ghost_row_button_style, icon_button_style, logo_badge_style, mini_player_fallback_style,
     mini_player_scrim_style, outlined_pill_button_style, player_dock_style,
-    popover_panel_style, slim_slider_style, soft_pill_button_style, top_pill_button_style,
+    popover_panel_style, slim_slider_style, soft_pill_button_style, stat_bar_fill_style,
+    stat_bar_track_style, top_pill_button_style,
     up_next_card_button_style, window_control_button_style, with_alpha,
 };
 use crate::{
@@ -1004,6 +1005,24 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                 .map(|l| l.text.as_str())
                 .filter(|s| !s.is_empty());
 
+            let pct = (pos_display as f32 / dur_max).clamp(0.0, 1.0);
+            let fill_p = ((pct * 1000.0).round() as u16).max(1);
+            let track_p = (((1.0 - pct) * 1000.0).round() as u16).max(1);
+            let progress_micro = container(
+                row![
+                    container(horizontal_space())
+                        .height(2)
+                        .width(Length::FillPortion(fill_p))
+                        .style(stat_bar_fill_style(accent, 1.0)),
+                    container(horizontal_space())
+                        .height(2)
+                        .width(Length::FillPortion(track_p))
+                        .style(stat_bar_track_style()),
+                ]
+            )
+            .width(Length::Fill)
+            .height(2);
+
             let track_row = row![
                 container(self.artwork_widget(thumb.as_deref(), 54.0, false))
                     .style(artwork_frame_style(8.0, 0.50)),
@@ -1018,17 +1037,32 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
                     .width(Length::Fill)
                     .clip(true),
                     container(
-                        text(ellipsize(active_lyric.unwrap_or(&artist), 42))
-                            .size(12)
-                            .color(if active_lyric.is_some() {
-                                accent
-                            } else {
-                                Color::from_rgba(1.0, 1.0, 1.0, 0.72)
-                            })
+                        text(ellipsize(&artist, 38))
+                            .size(11)
+                            .color(Color::from_rgba(1.0, 1.0, 1.0, 0.68))
                             .wrapping(Wrapping::None),
                     )
                     .width(Length::Fill)
                     .clip(true),
+                    if let Some(lyric) = active_lyric {
+                        Element::from(
+                            container(
+                                row![
+                                    icons::icon(icons::LYRICS, 10.0, accent),
+                                    text(ellipsize(lyric, 36))
+                                        .size(11)
+                                        .font(semibold())
+                                        .color(accent)
+                                        .wrapping(Wrapping::None),
+                                ]
+                                .spacing(4)
+                                .align_y(Alignment::Center),
+                            )
+                            .clip(true),
+                        )
+                    } else {
+                        Element::from(horizontal_space().height(0))
+                    },
                 ]
                 .spacing(2)
                 .width(Length::Fill),
@@ -1090,8 +1124,8 @@ impl EchoApp {    pub(crate) fn view_expanded_player(&self) -> Element<'_, Messa
             .spacing(6)
             .align_y(Alignment::Center);
 
-            column![drag_header, track_row, bottom_row]
-                .spacing(8)
+            column![drag_header, progress_micro, track_row, bottom_row]
+                .spacing(7)
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into()

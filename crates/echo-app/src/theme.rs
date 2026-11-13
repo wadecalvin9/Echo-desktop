@@ -489,7 +489,7 @@ pub fn liked_gradient_badge_style() -> impl Fn(&Theme) -> container::Style {
             background: Some(Background::Gradient(Gradient::Linear(grad))),
             text_color: Some(Color::WHITE),
             border: Border {
-                radius: 6.0.into(),
+                radius: 10.0.into(),
                 ..Default::default()
             },
             ..Default::default()
@@ -502,7 +502,7 @@ pub fn downloads_badge_style() -> impl Fn(&Theme) -> container::Style {
         background: Some(Background::Color(Color::from_rgb(0.16, 0.17, 0.19))),
         text_color: Some(Color::from_rgb(0.80, 0.82, 0.85)),
         border: Border {
-            radius: 6.0.into(),
+            radius: 10.0.into(),
             ..Default::default()
         },
         ..Default::default()
@@ -514,7 +514,7 @@ pub fn local_badge_style() -> impl Fn(&Theme) -> container::Style {
         background: Some(Background::Color(Color::from_rgb(0.16, 0.16, 0.18))),
         text_color: Some(Color::WHITE),
         border: Border {
-            radius: 6.0.into(),
+            radius: 10.0.into(),
             ..Default::default()
         },
         ..Default::default()
@@ -834,6 +834,120 @@ pub fn nav_item_button_style(
     }
 }
 
+/// Compact left rail navigation item (Home, Explore, Stats, Mic, Library, Plus)
+pub fn rail_nav_button_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let accent = color_from_rgb(p.primary);
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+
+        let (bg, fg, border, shadow) = if active {
+            (
+                with_alpha(accent, 0.16),
+                Color::WHITE,
+                Border {
+                    radius: 10.0.into(),
+                    width: 1.0,
+                    color: with_alpha(accent, 0.50),
+                },
+                Shadow {
+                    color: with_alpha(accent, 0.25),
+                    offset: Vector::ZERO,
+                    blur_radius: 6.0,
+                },
+            )
+        } else if hovered {
+            (
+                white(0.08),
+                Color::WHITE,
+                Border {
+                    radius: 10.0.into(),
+                    width: 1.0,
+                    color: white(0.12),
+                },
+                Shadow::default(),
+            )
+        } else {
+            (
+                Color::TRANSPARENT,
+                color_from_rgb(p.text_muted),
+                Border {
+                    radius: 10.0.into(),
+                    ..Default::default()
+                },
+                Shadow::default(),
+            )
+        };
+
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: fg,
+            border,
+            shadow,
+        }
+    }
+}
+
+/// Compact left rail badge / cover item (Liked Songs, Downloads, Local Files, Playlist Covers)
+pub fn rail_badge_button_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let accent = color_from_rgb(p.primary);
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+
+        let border = if active {
+            Border {
+                radius: 12.0.into(),
+                width: 2.0,
+                color: accent,
+            }
+        } else if hovered {
+            Border {
+                radius: 12.0.into(),
+                width: 1.5,
+                color: white(0.35),
+            }
+        } else {
+            Border {
+                radius: 12.0.into(),
+                width: 0.0,
+                color: Color::TRANSPARENT,
+            }
+        };
+
+        let shadow = if active {
+            Shadow {
+                color: with_alpha(accent, 0.45),
+                offset: Vector::ZERO,
+                blur_radius: 8.0,
+            }
+        } else if hovered {
+            Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                offset: Vector::new(0.0, 2.0),
+                blur_radius: 6.0,
+            }
+        } else {
+            Shadow::default()
+        };
+
+        button::Style {
+            background: Some(Background::Color(if hovered && !active {
+                white(0.04)
+            } else {
+                Color::TRANSPARENT
+            })),
+            text_color: color_from_rgb(p.text),
+            border,
+            shadow,
+        }
+    }
+}
+
 /// Frosted translucent sticky table header style for playlists and albums.
 pub fn sticky_header_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| container::Style {
@@ -1018,6 +1132,112 @@ pub fn icon_button_style(
                 radius: 999.0.into(),
                 ..Default::default()
             },
+            ..Default::default()
+        }
+    }
+}
+
+/// Top navigation Home button matching Spotify Desktop circular style.
+pub fn top_home_button_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let accent = color_from_rgb(p.primary);
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let base_bg = Color::from_rgb(0.141, 0.141, 0.155);
+
+        let (bg, fg, border, shadow) = if active {
+            (
+                with_alpha(accent, 0.20),
+                Color::WHITE,
+                Border {
+                    radius: 999.0.into(),
+                    width: 1.5,
+                    color: with_alpha(accent, 0.55),
+                },
+                Shadow {
+                    color: with_alpha(accent, 0.30),
+                    offset: Vector::ZERO,
+                    blur_radius: 8.0,
+                },
+            )
+        } else if hovered {
+            (
+                white(0.18),
+                Color::WHITE,
+                Border {
+                    radius: 999.0.into(),
+                    width: 1.0,
+                    color: white(0.12),
+                },
+                Shadow::default(),
+            )
+        } else {
+            (
+                base_bg,
+                color_from_rgb(p.text_muted),
+                Border {
+                    radius: 999.0.into(),
+                    ..Default::default()
+                },
+                Shadow::default(),
+            )
+        };
+
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: fg,
+            border,
+            shadow,
+        }
+    }
+}
+
+/// Embedded Explore button at the right end of the search pill.
+pub fn top_embedded_explore_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let accent = color_from_rgb(p.primary);
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+
+        let (bg, fg, border) = if active {
+            (
+                with_alpha(accent, 0.22),
+                Color::WHITE,
+                Border {
+                    radius: 999.0.into(),
+                    width: 1.0,
+                    color: with_alpha(accent, 0.50),
+                },
+            )
+        } else if hovered {
+            (
+                white(0.10),
+                Color::WHITE,
+                Border {
+                    radius: 999.0.into(),
+                    width: 1.0,
+                    color: white(0.12),
+                },
+            )
+        } else {
+            (
+                Color::TRANSPARENT,
+                color_from_rgb(p.text_muted),
+                Border {
+                    radius: 999.0.into(),
+                    ..Default::default()
+                },
+            )
+        };
+
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color: fg,
+            border,
             ..Default::default()
         }
     }

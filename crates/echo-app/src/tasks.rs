@@ -629,6 +629,33 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
         )
     }
 
+    pub(crate) fn prune_cover_cache_if_needed(&mut self) {
+        const MAX_COVERS: usize = 200;
+        if self.rounded_covers.len() <= MAX_COVERS {
+            return;
+        }
+        let current_thumb = self
+            .queue
+            .current()
+            .and_then(|c| c.track.thumbnail_url.clone());
+
+        while self.rounded_covers.len() > MAX_COVERS {
+            if let Some(oldest) = self.cover_order.pop_front() {
+                if Some(&oldest) == current_thumb.as_ref() {
+                    self.cover_order.push_back(oldest);
+                    continue;
+                }
+                self.rounded_covers.remove(&oldest);
+                self.circle_covers.remove(&oldest);
+                self.blurred_covers.remove(&oldest);
+                self.cover_bytes.remove(&oldest);
+                self.cover_tints.remove(&oldest);
+            } else {
+                break;
+            }
+        }
+    }
+
     pub(crate) fn fetch_lyrics_for_track(&self, track: &Track) -> Task<Message> {
         let lf = Arc::clone(&self.lyrics_fetcher);
         let t_lyrics = track.clone();
@@ -689,7 +716,10 @@ impl EchoApp {    pub(crate) fn set_toast(&mut self, msg: impl Into<String>) {
         };
 
         self.status = PlaybackStatus::Loading;
-        self.position_ms = 0;
+        if self.stream_retry_count == 0 {
+            self.position_ms = 0;
+            self.seeking_ms = None;
+        }
         self.duration_ms = track.duration_secs.unwrap_or(0) as u64 * 1000;
         self.active_lyrics = None;
         self.last_lyric_idx = None;

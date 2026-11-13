@@ -604,6 +604,10 @@ impl EchoApp {
                             approx_duration_ms: stream.approx_duration_ms,
                             loudness_db: track.loudness_db,
                         });
+                        if let Some(pos) = self.seeking_ms.take() {
+                            self.audio.seek_ms(pos);
+                            self.position_ms = pos;
+                        }
                         if self.settings.max_cache_size_mb > 0 {
                             let max_mb = self.settings.max_cache_size_mb;
                             if stream.content_length.unwrap_or(0) <= (32 * 1024 * 1024) {
@@ -640,8 +644,15 @@ impl EchoApp {
                     }
                     Err(e) => {
                         self.yt.invalidate_stream(&track.id);
-                        self.status = PlaybackStatus::Error(e.clone());
-                        self.set_toast(format!("Playback error: {e}"));
+                        let is_stream_err = e.contains("403") || e.contains("Forbidden");
+                        if self.stream_retry_count < 2 && is_stream_err {
+                            self.stream_retry_count += 1;
+                            self.set_toast(format!("Re-resolving audio stream (attempt {}/2)...", self.stream_retry_count));
+                            return self.start_playing_current();
+                        } else {
+                            self.status = PlaybackStatus::Error(e.clone());
+                            self.set_toast(format!("Playback error: {e}"));
+                        }
                     }
                 }
                 Task::none()
@@ -704,6 +715,8 @@ impl EchoApp {
                         self.cover_bytes.insert(upgraded, raw);
                     }
                 }
+                self.cover_order.push_back(url);
+                self.prune_cover_cache_if_needed();
                 Task::none()
             }
             Message::LyricsLoaded { track_id, lyrics } => {
@@ -720,7 +733,7 @@ impl EchoApp {
                 Task::perform(
                     async move {
                         tokio::task::spawn_blocking(move || {
-                            crate::auth::launch_google_signin_webview()
+                            crate::auth::launch_google_signin_webview(true)
                         })
                         .await
                         .map_err(|e| format!("Task execution error: {e}"))
@@ -756,21 +769,34 @@ impl EchoApp {
                 self.settings.youtube_cookie = cookie_opt.clone();
                 self.yt.set_cookie(cookie_opt);
                 let _ = self.settings.save();
-                self.account_sync_status = Some(if self.yt.has_cookie() {
-                    "Cookie saved. Click Sync Account to import playlists & liked songs."
-                        .to_string()
+                if self.yt.has_cookie() {
+                    self.account_sync_status =
+                        Some("Cookie saved! Syncing playlists & liked songs...".to_string());
+                    self.set_toast("Connecting and syncing YouTube Music...");
+                    self.update(Message::SyncYouTubeAccount)
                 } else {
-                    "YouTube cookie cleared.".to_string()
-                });
-                Task::none()
+                    self.account_playlists.clear();
+                    self.account_sync_status = Some("YouTube cookie cleared.".to_string());
+                    Task::none()
+                }
             }
             Message::ClearYouTubeCookie => {
                 self.yt_cookie_input.clear();
                 self.settings.youtube_cookie = None;
                 self.yt.set_cookie(None);
                 self.account_playlists.clear();
-                self.account_sync_status = Some("Signed out of YouTube Music".to_string());
+                self.account_sync_status = Some("Signed out of YouTube Music (session disconnected)".to_string());
+                self.set_toast("Disconnected YouTube Music session");
                 let _ = self.settings.save();
+                // Wipe the persistent WebView2 cache so subsequent logins are clean
+                let webview_dir = std::env::var_os("LOCALAPPDATA")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(std::env::temp_dir)
+                    .join("Echo")
+                    .join("auth_webview");
+                if webview_dir.exists() {
+                    let _ = std::fs::remove_dir_all(&webview_dir);
+                }
                 Task::none()
             }
             Message::SyncYouTubeAccount => {

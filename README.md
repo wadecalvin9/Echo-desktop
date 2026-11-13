@@ -1,44 +1,160 @@
+<div align="center">
+
+<img src="assets/icon.png" width="100" height="100" alt="Echo Desktop Icon" style="border-radius: 20px;" />
+
 # Echo Desktop
 
-A pure-Rust desktop music player built with **Iced**, **Tokio**, **Symphonia**, and **CPAL**.
+### Pure-Rust YouTube Music Streaming & Audiophile Desktop Music Player
+
+[![Platform](https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/wadecalvin9/echo-releases)
+[![Rust](https://img.shields.io/badge/Language-Pure%20Rust%20(Iced%200.13)-DEA584?style=for-the-badge&logo=rust&logoColor=white)](https://github.com/wadecalvin9/Echo-desktop)
+[![License](https://img.shields.io/badge/License-GPL%203.0-blue?style=for-the-badge)](https://www.gnu.org/licenses/gpl-3.0)
+[![Creator](https://img.shields.io/badge/Creator-wadecalvin9-181717?style=for-the-badge&logo=github&logoColor=white)](https://github.com/wadecalvin9)
+[![Releases](https://img.shields.io/badge/Releases-echo--releases-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/wadecalvin9/echo-releases)
+
+<p align="center">
+  <a href="https://github.com/wadecalvin9/echo-releases"><b>[ Download Latest Release ]</b></a> •
+  <a href="#screenshots">Screenshots</a> •
+  <a href="#features">Features</a> •
+  <a href="#keyboard-shortcuts">Shortcuts</a> •
+  <a href="#building-from-source">Build from Source</a> •
+  <a href="#about--creator">Creator</a>
+</p>
+
+</div>
+
+---
+
+## Overview
+
+**Echo Desktop** is a lightning-fast, distraction-free desktop music player tailored for streaming YouTube Music and playing your personal offline music library. Built from the ground up in pure **Rust** with **Iced**, **Tokio**, **Symphonia**, and **CPAL**, Echo brings an audiophile-grade audio pipeline and a modern Spotify Desktop-inspired interface to Windows.
+
+No telemetry. No advertisements. No mandatory account logins. Just instant, bit-perfect music playback.
+
+---
+
+## Screenshots
+
+<div align="center">
+
+### Home & Discover
+<img src="assets/screenshot_home.jpg" width="95%" alt="Echo Desktop - Home & Discover" />
+
+<br/><br/>
+
+### Now Playing & Lyrics Preview
+<img src="assets/screenshot_nowplaying.jpg" width="95%" alt="Echo Desktop - Now Playing & Queue" />
+
+<br/><br/>
+
+### Expanded Synced Lyrics Stage
+<img src="assets/screenshot_lyrics.jpg" width="95%" alt="Echo Desktop - Cinema Synced Lyrics Stage" />
+
+<br/><br/>
+
+### Artist Detail & Verified Discography
+<img src="assets/screenshot_artist.jpg" width="95%" alt="Echo Desktop - Artist Detail Page" />
+
+</div>
+
+---
 
 ## Features
 
-- **Frameless Dark Desktop UI:** Borderless custom titlebar with window drag and minimize/maximize/close controls, responsive three-pane shell, dynamic album-art color theming (`Dynamic`, `Dark`, `OLED Black`), and a cinema-style Expanded Lyrics Stage.
-- **YouTube Music Streaming & Browse:** Personalized Home shelves & mood chips, Explore (New Releases, Moods & Genres), autocomplete search, Artist/Album/Playlist detail pages, adaptive radio queue, and optional cookie-based account sync.
-- **Audio Engine & DSP:** Symphonia + CPAL playback with Echo loudness leveling (`-3 dB` reference), `+12 dB` soft-clipped boost, 3-band equalizer presets, spatial audio, silence skipping, transition fades, and a sleep timer.
-- **Synced & Romanized Lyrics:** LRCLIB, KuGou, and Better Lyrics (TTML) fetching with click-to-seek synced lines, auto-scroll, and CJK/Hangul/Kana romanization.
-- **Song Recognition (Shazam):** 16 kHz mono audio fingerprinting from WASAPI loopback or microphone input with speed-retry fallback and recognition history.
-- **Offline Downloads, Cache & Local Media:** Disk LRU stream cache, `[youtube_id]` download folder import/migration, and local audio library scanning (`lofty` tags + folder tree view).
-- **Integrations & Persistence:** SQLite library/history/stats (`rusqlite`), Last.fm Now Playing & scrobbling, Windows System Media Transport Controls (SMTC), and `.echobak` backup/restore.
+- **Spotify Desktop-Style Top Navigation:**
+  - Dedicated circular **Home** button adjacent to the search capsule.
+  - Unified search pill with live autocomplete (`Ctrl+K`) and an embedded **Explore / Browse** button.
+  - Draggable custom titlebar with seamless minimize/maximize/close controls and window state preservation.
 
-## Workspace Layout
+- **Polished Responsive Shell:**
+  - Modern collapsible left navigation rail with clean 44×44 squircle icons and zero visual scrollbar overlap.
+  - Multi-pane layout: Left library rail, main content center, and right Now Playing / Queue panel.
+  - Dynamic album-art responsive theming (`Dynamic`, `Dark`, `OLED True Black`).
 
-- `crates/echo-core`: Domain models, SQLite persistence (`rusqlite`), settings, stream LRU cache, local media & download scanners, `.echobak` backup/restore, and dynamic album-art color extraction.
-- `crates/echo-fingerprint`: Shazam/SongRec 16 kHz mono audio fingerprinting, Shazam recognition client, and microphone/WASAPI loopback capture.
-- `crates/echo-lyrics`: LRCLIB, KuGou, and Better Lyrics (TTML) clients, synced `.lrc` parser, and romanization.
-- `crates/echo-lastfm`: Last.fm browser auth, Now Playing, scrobbling, and `track.getSimilar`.
-- `crates/echo-youtube`: YouTube Music InnerTube API client, stream resolution, and chunked range buffer.
-- `crates/echo-audio`: Symphonia + CPAL playback engine with loudness leveling, soft-clipped limiter, EQ, spatial widening, and silence gating.
-- `crates/echo-app`: Iced desktop GUI (`Home`, `Explore`, `Library`, `Search`, `Recognize`, `Stats`, `Settings`, `Expanded Lyrics Stage`, and `Queue`).
+- **YouTube Music Streaming & Account Sync:**
+  - Personalized Home shelves, mood chips, quick picks, and daily spotlights.
+  - Full catalog search with autocomplete suggestions, Artist, Album, and Playlist detail pages.
+  - Optional isolated Google Sign-In helper (`echo-auth`) to sync your YouTube Music library, liked songs, and custom playlists.
+
+- **Cinema-Style Expanded Lyrics Stage:**
+  - Real-time synced lyrics from LRCLIB, KuGou, and Better Lyrics (TTML).
+  - Click-to-seek line synchronization with smooth auto-scroll.
+  - Romanization for CJK, Hangul, and Kana characters.
+  - Interactive audio waveform bar and loudness LUFS display.
+
+- **Song Recognition (Shazam / SongRec):**
+  - 16 kHz mono audio fingerprinting with speed-retry fallback.
+  - Identify songs playing anywhere on your PC via **WASAPI loopback** or microphone capture.
+  - Recognition history saved to local database.
+
+- **Audiophile DSP & Loudness Engine:**
+  - Symphonia + CPAL playback pipeline with Echo loudness leveling (`-3 dB` reference).
+  - Soft-clipped limiter boost up to `+12 dB`.
+  - 10-band custom graphic equalizer + Harman AutoEQ headphone profiles.
+  - Spatial audio widening, silence skipping, and smooth transition fades.
+  - Configurable sleep timer and output device routing.
+
+- **Storage, Cache & Local Library:**
+  - LRU disk stream cache for instant offline replays.
+  - Offline download manager and local folder indexing (`lofty` tag scanner + tree view).
+  - SQLite persistence (`rusqlite`) for history, statistics, and playlists.
+  - Full `.echobak` snapshot backup and restore.
+
+- **Integrations:**
+  - Last.fm Now Playing & scrobbling support.
+  - Windows System Media Transport Controls (SMTC) and taskbar playback progress.
+  - Google Cast / Chromecast, DLNA, and FCast device streaming.
+
+---
 
 ## Keyboard Shortcuts
 
-- `Ctrl+K` / `Ctrl+F`: Focus search bar
-- `Space`: Play / Pause (when not typing in an input)
-- `Left` / `Right`: Seek `-5s` / `+5s`
-- `Up` / `Down`: Volume `+10%` / `-10%`
-- `M`: Mute / Unmute
-- `Esc`: Close search suggestions, exit Expanded Stage, or navigate back
-- Media keys (`Play/Pause`, `Next`, `Previous`): Global/window playback control + Windows SMTC
+| Shortcut | Action |
+| :--- | :--- |
+| `Ctrl+K` / `Ctrl+F` | Focus search bar |
+| `Space` | Play / Pause |
+| `Left` / `Right` | Seek `-5s` / `+5s` |
+| `Shift + Left` / `Right` | Seek `-15s` / `+15s` |
+| `Up` / `Down` | Volume `+5%` / `-5%` |
+| `M` | Mute / Unmute |
+| `L` | Like / Unlike current track |
+| `Esc` | Close search dropdown, exit Expanded Lyrics Stage, or navigate back |
+| `Media Keys` | Global Play/Pause, Next, Previous via Windows SMTC |
 
-## Building & Running (Windows)
+---
+
+## Building from Source
+
+### Prerequisites (Windows)
+- [Rust toolchain](https://rustup.rs/) (stable channel)
+- LLVM MinGW UCRT or MSVC toolchain
 
 ```powershell
-# Using LLVM-MinGW UCRT toolchain (example)
-$env:PATH = "$env:USERPROFILE\.cargo\bin;C:\Users\Administrator\llvm-mingw-ucrt\bin;C:\Windows\System32;C:\Windows"
+# Clone the repository
+git clone https://github.com/wadecalvin9/Echo-desktop.git
+cd Echo-desktop
+
+# Run unit and integration tests
 cargo test --workspace
-cargo run -p echo-app
+
+# Build optimized release binaries
+cargo build --release -p echo-app -p echo-auth
+
+# Run the app
+./target/x86_64-pc-windows-gnullvm/release/echo-app.exe
 ```
 
-Optional Last.fm credentials can be entered in **Settings -> Last.fm Scrobbling** or via `ECHO_LASTFM_API_KEY` and `ECHO_LASTFM_API_SECRET` environment variables.
+---
+
+## About & Creator
+
+- **Lead Developer & Creator:** [wadecalvin9](https://github.com/wadecalvin9)
+- **Source Repository:** [Echo-desktop](https://github.com/wadecalvin9/Echo-desktop)
+- **Official Releases:** [echo-releases](https://github.com/wadecalvin9/echo-releases)
+- **License:** GNU General Public License v3.0 (GPL-3.0-or-later)
+
+---
+
+<div align="center">
+  <sub>Built with ❤️ in Rust for music lovers worldwide.</sub>
+</div>

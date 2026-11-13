@@ -1,6 +1,6 @@
 use crate::client::{
-    parse_cookie_map, sapisid_auth_header, YouTubeClientProfile, YouTubeLocale,
-    API_URL_YOUTUBE_MUSIC, ORIGIN_YOUTUBE_MUSIC, REFERER_YOUTUBE_MUSIC,
+    extract_sapisid_from_cookie_map, parse_cookie_map, sapisid_auth_header, YouTubeClientProfile,
+    YouTubeLocale, API_URL_YOUTUBE_MUSIC, ORIGIN_YOUTUBE_MUSIC, REFERER_YOUTUBE_MUSIC,
 };
 use crate::models::{
     make_track, AccountPlaylist, AlbumPage, ArtistPage, ArtistSection, BrowseItem, ExplorePage,
@@ -134,11 +134,12 @@ impl YouTubeMusicClient {
 
         if with_login && profile.login_supported {
             if let Some(cookie) = self.cookie.lock().expect("cookie").clone() {
-                if let Ok(val) = HeaderValue::from_str(&cookie) {
+                let clean_cookie = cookie.replace(['\r', '\n'], "").trim().to_string();
+                if let Ok(val) = HeaderValue::from_str(&clean_cookie) {
                     headers.insert(COOKIE, val);
                 }
-                let map = parse_cookie_map(&cookie);
-                if let Some(sapisid) = map.get("SAPISID") {
+                let map = parse_cookie_map(&clean_cookie);
+                if let Some(sapisid) = extract_sapisid_from_cookie_map(&map) {
                     let unix_secs = std::time::SystemTime::now()
                         .duration_since(std::time::UNIX_EPOCH)
                         .map(|d| d.as_secs() as i64)
@@ -158,8 +159,13 @@ impl YouTubeMusicClient {
             .headers(headers)
             .json(&body)
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let err_body = resp.text().await.unwrap_or_default();
+            tracing::warn!("InnerTube error on {endpoint}: status {status}, body: {err_body}");
+            return Err(YouTubeError::Unplayable(format!("HTTP {status}: {err_body}")));
+        }
         let val = resp.json::<Value>().await?;
         if self.visitor_data.lock().expect("vd").is_none() {
             if let Some(vd) = val
@@ -508,6 +514,7 @@ impl YouTubeMusicClient {
                 "YouTube Music cookie is not configured".to_string(),
             ));
         }
+        self.ensure_visitor_data().await;
         let body = json!({
             "context": self.base_context(&YouTubeClientProfile::WEB_REMIX, None),
             "browseId": "FEmusic_liked_playlists"
@@ -515,7 +522,25 @@ impl YouTubeMusicClient {
         let val = self
             .post_innertube("browse", &YouTubeClientProfile::WEB_REMIX, body, true)
             .await?;
-        Ok(parse_account_playlists_response(&val))
+        let res = parse_account_playlists_response(&val);
+        if !res.is_empty() {
+            return Ok(res);
+        }
+        // Fallback: try FEmusic_library_landing
+        let body_fallback = json!({
+            "context": self.base_context(&YouTubeClientProfile::WEB_REMIX, None),
+            "browseId": "FEmusic_library_landing"
+        });
+        if let Ok(val2) = self
+            .post_innertube("browse", &YouTubeClientProfile::WEB_REMIX, body_fallback, true)
+            .await
+        {
+            let res2 = parse_account_playlists_response(&val2);
+            if !res2.is_empty() {
+                return Ok(res2);
+            }
+        }
+        Ok(res)
     }
 
     pub async fn liked_songs_remote(&self) -> Result<PlaylistPage, YouTubeError> {
@@ -524,7 +549,25 @@ impl YouTubeMusicClient {
                 "YouTube Music cookie is not configured".to_string(),
             ));
         }
-        self.playlist_page("VLLM").await
+        self.ensure_visitor_data().await;
+
+        // Try canonical FEmusic_liked_videos first (as in Android Echo)
+        let body_likes = json!({
+            "context": self.base_context(&YouTubeClientProfile::WEB_REMIX, None),
+            "browseId": "FEmusic_liked_videos"
+        });
+        if let Ok(val) = self
+            .post_innertube("browse", &YouTubeClientProfile::WEB_REMIX, body_likes, true)
+            .await
+        {
+            let page = parse_playlist_response("LM", &val);
+            if !page.tracks.is_empty() {
+                return Ok(page);
+            }
+        }
+
+        // Fallback to playlist_page("LM") / "VLLM"
+        self.playlist_page("LM").await
     }
 
     pub async fn like_video(&self, video_id: &str, like: bool) -> Result<(), YouTubeError> {
@@ -645,7 +688,7 @@ impl YouTubeMusicClient {
             headers.insert(COOKIE, v);
         }
         let map = parse_cookie_map(&cookie);
-        if let Some(sapisid) = map.get("SAPISID") {
+        if let Some(sapisid) = extract_sapisid_from_cookie_map(&map) {
             let unix_secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
@@ -899,6 +942,7 @@ fn find_visitor_data(val: &Value) -> Option<String> {
 
 fn best_thumbnail(node: &Value) -> Option<String> {
     node.pointer("/musicThumbnailRenderer/thumbnail/thumbnails")
+        .or_else(|| node.pointer("/croppedSquareThumbnailRenderer/thumbnail/thumbnails"))
         .or_else(|| node.pointer("/thumbnails"))
         .and_then(|v| v.as_array())
         .and_then(|arr| arr.last())
@@ -1012,6 +1056,8 @@ fn parse_responsive_item(r: &Value, filter: SearchFilter) -> Option<BrowseItem> 
     let video_id = r
         .pointer("/playlistItemData/videoId")
         .or_else(|| r.pointer("/overlay/musicItemThumbnailOverlayRenderer/content/musicPlayButtonRenderer/playNavigationEndpoint/watchEndpoint/videoId"))
+        .or_else(|| r.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs/0/navigationEndpoint/watchEndpoint/videoId"))
+        .or_else(|| r.pointer("/navigationEndpoint/watchEndpoint/videoId"))
         .and_then(|v| v.as_str())
         .map(ToString::to_string);
 
@@ -1378,10 +1424,26 @@ fn parse_playlist_response(playlist_id: &str, val: &Value) -> PlaylistPage {
         .pointer("/header/musicEditablePlaylistDetailHeaderRenderer")
         .is_some();
 
-    let shelf = val
+    let mut shelf = val
         .pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents/0/musicPlaylistShelfRenderer")
         .or_else(|| val.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents/0/musicShelfRenderer"))
-        .or_else(|| val.pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicPlaylistShelfRenderer"));
+        .or_else(|| val.pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicPlaylistShelfRenderer"))
+        .or_else(|| val.pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/musicShelfRenderer"));
+
+    if shelf.is_none() {
+        if let Some(contents) = val
+            .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
+            .or_else(|| val.pointer("/contents/twoColumnBrowseResultsRenderer/secondaryContents/sectionListRenderer/contents"))
+            .and_then(|v| v.as_array())
+        {
+            for c in contents {
+                if let Some(s) = c.get("musicPlaylistShelfRenderer").or_else(|| c.get("musicShelfRenderer")) {
+                    shelf = Some(s);
+                    break;
+                }
+            }
+        }
+    }
 
     let contents = shelf
         .and_then(|s| s.get("contents"))
@@ -1389,13 +1451,19 @@ fn parse_playlist_response(playlist_id: &str, val: &Value) -> PlaylistPage {
         .map(Vec::as_slice)
         .unwrap_or(&[]);
 
+    let mut tracks = parse_track_rows(contents);
+    if tracks.is_empty() {
+        let mut seen = HashSet::new();
+        recursive_extract_tracks(val, &mut seen, &mut tracks);
+    }
+
     PlaylistPage {
         id: playlist_id.to_string(),
         title,
         author,
         thumbnail_url,
         track_count_text,
-        tracks: parse_track_rows(contents),
+        tracks,
         continuation: extract_continuation(shelf, Some(contents)),
         is_editable,
     }
@@ -1851,50 +1919,206 @@ fn parse_related_response(val: &Value) -> RelatedPage {
 
 fn parse_account_playlists_response(val: &Value) -> Vec<AccountPlaylist> {
     let mut playlists = Vec::new();
-    let items = val
-        .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/gridRenderer/items")
-        .and_then(|v| v.as_array());
-    let Some(arr) = items else {
-        return playlists;
-    };
-    for entry in arr {
-        let Some(r) = entry.get("musicTwoRowItemRenderer") else {
-            continue;
-        };
-        let Some(BrowseItem::Playlist {
-            id,
-            title,
-            author,
-            thumbnail_url,
-        }) = parse_two_row_item(r)
-        else {
-            continue;
-        };
-        if id == "LM" {
-            continue;
+    let mut seen_ids = HashSet::new();
+    let mut item_arrays: Vec<&Vec<Value>> = Vec::new();
+
+    if let Some(contents) = val
+        .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents")
+        .and_then(|v| v.as_array())
+    {
+        for sec in contents {
+            if let Some(arr) = sec.pointer("/gridRenderer/items").and_then(|v| v.as_array()) {
+                item_arrays.push(arr);
+            }
+            if let Some(arr) = sec.pointer("/musicShelfRenderer/contents").and_then(|v| v.as_array()) {
+                item_arrays.push(arr);
+            }
         }
-        let song_count_text = Some(join_runs_text(r.pointer("/subtitle/runs"))).filter(|s| !s.is_empty());
-        let is_editable = r
-            .pointer("/menu/menuRenderer/items")
-            .and_then(|v| v.as_array())
-            .map(|items| {
-                items.iter().any(|it| {
-                    it.pointer("/menuNavigationItemRenderer/icon/iconType")
-                        .and_then(|v| v.as_str())
-                        == Some("DELETE")
-                })
-            })
-            .unwrap_or(false);
-        playlists.push(AccountPlaylist {
-            id,
-            title,
-            author: Some(author),
-            song_count_text,
-            thumbnail_url,
-            is_editable,
-        });
     }
+
+    if item_arrays.is_empty() {
+        if let Some(arr) = val
+            .pointer("/contents/singleColumnBrowseResultsRenderer/tabs/0/tabRenderer/content/sectionListRenderer/contents/0/gridRenderer/items")
+            .and_then(|v| v.as_array())
+        {
+            item_arrays.push(arr);
+        }
+    }
+
+    for arr in item_arrays {
+        for entry in arr {
+            if let Some(r) = entry.get("musicTwoRowItemRenderer") {
+                if let Some(BrowseItem::Playlist {
+                    id,
+                    title,
+                    author,
+                    thumbnail_url,
+                }) = parse_two_row_item(r)
+                {
+                    if id == "LM" || seen_ids.contains(&id) {
+                        continue;
+                    }
+                    seen_ids.insert(id.clone());
+                    let song_count_text = Some(join_runs_text(r.pointer("/subtitle/runs"))).filter(|s| !s.is_empty());
+                    let is_editable = r
+                        .pointer("/menu/menuRenderer/items")
+                        .and_then(|v| v.as_array())
+                        .map(|items| {
+                            items.iter().any(|it| {
+                                it.pointer("/menuNavigationItemRenderer/icon/iconType")
+                                    .and_then(|v| v.as_str())
+                                    == Some("DELETE")
+                            })
+                        })
+                        .unwrap_or(false);
+                    playlists.push(AccountPlaylist {
+                        id,
+                        title,
+                        author: Some(author),
+                        song_count_text,
+                        thumbnail_url,
+                        is_editable,
+                    });
+                }
+            } else if let Some(r) = entry.get("musicResponsiveListItemRenderer") {
+                if let Some(id) = r
+                    .pointer("/navigationEndpoint/browseEndpoint/browseId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.strip_prefix("VL").unwrap_or(s).to_string())
+                {
+                    if id == "LM" || seen_ids.contains(&id) {
+                        continue;
+                    }
+                    seen_ids.insert(id.clone());
+                    let title = join_runs_text(r.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs"));
+                    let author = join_runs_text(r.pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs"));
+                    let thumbnail_url = r.pointer("/thumbnail/musicThumbnailRenderer").and_then(best_thumbnail);
+                    if !title.is_empty() {
+                        playlists.push(AccountPlaylist {
+                            id,
+                            title,
+                            author: Some(author),
+                            song_count_text: None,
+                            thumbnail_url,
+                            is_editable: false,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if playlists.is_empty() {
+        recursive_extract_playlists(val, &mut seen_ids, &mut playlists);
+    }
+
     playlists
+}
+
+fn recursive_extract_playlists(
+    v: &Value,
+    seen_ids: &mut HashSet<String>,
+    out: &mut Vec<AccountPlaylist>,
+) {
+    match v {
+        Value::Object(map) => {
+            if let Some(r) = map.get("musicTwoRowItemRenderer") {
+                if let Some(BrowseItem::Playlist {
+                    id,
+                    title,
+                    author,
+                    thumbnail_url,
+                }) = parse_two_row_item(r)
+                {
+                    if id != "LM" && id != "SE" && seen_ids.insert(id.clone()) {
+                        let song_count_text =
+                            Some(join_runs_text(r.pointer("/subtitle/runs"))).filter(|s| !s.is_empty());
+                        let is_editable = r
+                            .pointer("/menu/menuRenderer/items")
+                            .and_then(|v| v.as_array())
+                            .map(|items| {
+                                items.iter().any(|it| {
+                                    it.pointer("/menuNavigationItemRenderer/icon/iconType")
+                                        .and_then(|v| v.as_str())
+                                        == Some("DELETE")
+                                })
+                            })
+                            .unwrap_or(false);
+                        out.push(AccountPlaylist {
+                            id,
+                            title,
+                            author: Some(author),
+                            song_count_text,
+                            thumbnail_url,
+                            is_editable,
+                        });
+                    }
+                }
+            } else if let Some(r) = map.get("musicResponsiveListItemRenderer") {
+                if let Some(id) = r
+                    .pointer("/navigationEndpoint/browseEndpoint/browseId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.strip_prefix("VL").unwrap_or(s).to_string())
+                {
+                    let is_pl = id.starts_with("PL")
+                        || r.pointer("/navigationEndpoint/browseEndpoint/browseEndpointContextSupportedConfigs/browseEndpointContextMusicConfig/pageType")
+                            .and_then(|v| v.as_str())
+                            == Some("MUSIC_PAGE_TYPE_PLAYLIST");
+                    if is_pl && id != "LM" && id != "SE" && seen_ids.insert(id.clone()) {
+                        let title = join_runs_text(
+                            r.pointer("/flexColumns/0/musicResponsiveListItemFlexColumnRenderer/text/runs"),
+                        );
+                        let author = join_runs_text(
+                            r.pointer("/flexColumns/1/musicResponsiveListItemFlexColumnRenderer/text/runs"),
+                        );
+                        let thumbnail_url = r.pointer("/thumbnail").and_then(best_thumbnail);
+                        if !title.is_empty() {
+                            out.push(AccountPlaylist {
+                                id,
+                                title,
+                                author: Some(author),
+                                song_count_text: None,
+                                thumbnail_url,
+                                is_editable: false,
+                            });
+                        }
+                    }
+                }
+            }
+            for val in map.values() {
+                recursive_extract_playlists(val, seen_ids, out);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                recursive_extract_playlists(item, seen_ids, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn recursive_extract_tracks(v: &Value, seen: &mut HashSet<String>, out: &mut Vec<Track>) {
+    match v {
+        Value::Object(map) => {
+            if let Some(r) = map.get("musicResponsiveListItemRenderer") {
+                if let Some(BrowseItem::Track(t)) = parse_responsive_item(r, SearchFilter::Songs) {
+                    if seen.insert(t.id.clone()) {
+                        out.push(t);
+                    }
+                }
+            }
+            for val in map.values() {
+                recursive_extract_tracks(val, seen, out);
+            }
+        }
+        Value::Array(arr) => {
+            for item in arr {
+                recursive_extract_tracks(item, seen, out);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[cfg(test)]
@@ -2080,6 +2304,52 @@ mod tests {
         let parsed = parse_playlist_continuation_response("PL1", &cont);
         assert_eq!(parsed.tracks.len(), 1);
         assert_eq!(parsed.continuation.as_deref(), Some("TOKEN_2"));
+    }
+
+    #[test]
+    fn parses_account_playlists_nested_and_responsive() {
+        let resp = json!({
+            "contents": {
+                "singleColumnBrowseResultsRenderer": {
+                    "tabs": [{
+                        "tabRenderer": {
+                            "content": {
+                                "sectionListRenderer": {
+                                    "contents": [{
+                                        "musicShelfRenderer": {
+                                            "contents": [
+                                                {
+                                                    "musicResponsiveListItemRenderer": {
+                                                        "navigationEndpoint": {
+                                                            "browseEndpoint": {
+                                                                "browseId": "VLPL_user_favorites",
+                                                                "browseEndpointContextSupportedConfigs": {
+                                                                    "browseEndpointContextMusicConfig": {
+                                                                        "pageType": "MUSIC_PAGE_TYPE_PLAYLIST"
+                                                                    }
+                                                                }
+                                                            }
+                                                        },
+                                                        "flexColumns": [
+                                                            { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "My Favorites" }] } } },
+                                                            { "musicResponsiveListItemFlexColumnRenderer": { "text": { "runs": [{ "text": "User • 25 songs" }] } } }
+                                                        ]
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }]
+                                }
+                            }
+                        }
+                    }]
+                }
+            }
+        });
+        let pls = parse_account_playlists_response(&resp);
+        assert_eq!(pls.len(), 1);
+        assert_eq!(pls[0].id, "PL_user_favorites");
+        assert_eq!(pls[0].title, "My Favorites");
     }
 }
 

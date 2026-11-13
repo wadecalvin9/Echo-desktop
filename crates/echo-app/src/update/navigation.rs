@@ -159,6 +159,23 @@ impl EchoApp {
                 }
                 Task::none()
             }
+            Message::OpenUrl(url) => {
+                #[cfg(windows)]
+                {
+                    use windows::core::HSTRING;
+                    use windows::core::w;
+                    use windows::Win32::UI::Shell::ShellExecuteW;
+                    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+                    unsafe {
+                        let _ = ShellExecuteW(None, w!("open"), &HSTRING::from(&url), None, None, SW_SHOWNORMAL);
+                    }
+                }
+                #[cfg(not(windows))]
+                {
+                    let _ = std::process::Command::new("xdg-open").arg(&url).spawn();
+                }
+                Task::none()
+            }
             Message::ToggleExpandedPlayer => {
                 self.show_expanded = !self.show_expanded;
                 if self.show_expanded {
@@ -224,10 +241,28 @@ impl EchoApp {
             }
             Message::FocusSearch => text_input::focus(self.search_input_id.clone()),
             Message::KeyPressed(key, modifiers, captured) => {
+                if modifiers.control() && modifiers.alt() {
+                    match &key {
+                        Key::Named(Named::Space) => return self.update(Message::TogglePlayPause),
+                        Key::Named(Named::ArrowRight) => return self.update(Message::NextTrack),
+                        Key::Named(Named::ArrowLeft) => return self.update(Message::PrevTrack),
+                        Key::Named(Named::ArrowUp) => {
+                            return self.update(Message::VolumeChanged(self.settings.volume + 0.05));
+                        }
+                        Key::Named(Named::ArrowDown) => {
+                            return self.update(Message::VolumeChanged(self.settings.volume - 0.05));
+                        }
+                        _ => {}
+                    }
+                }
                 if modifiers.control() {
                     if let Key::Character(c) = &key {
                         if c.eq_ignore_ascii_case("k") || c.eq_ignore_ascii_case("f") {
                             return self.update(Message::FocusSearch);
+                        } else if c.eq_ignore_ascii_case("m") {
+                            return self.update(Message::ToggleMute);
+                        } else if c.eq_ignore_ascii_case("l") {
+                            return self.update(Message::ToggleLikeCurrent);
                         }
                     }
                 }
@@ -307,6 +342,9 @@ impl EchoApp {
                 self.window_hwnd = hwnd;
                 if self.smtc.is_none() {
                     self.smtc = smtc::SmtcBridge::new(hwnd);
+                }
+                if self.taskbar.is_none() {
+                    self.taskbar = crate::taskbar::TaskbarProgress::new(hwnd);
                 }
                 if self.tray.is_none() {
                     self.tray = Some(tray::TrayBridge::new(hwnd));

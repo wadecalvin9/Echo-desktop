@@ -599,12 +599,22 @@ impl EchoApp {    pub(crate) fn artwork_widget(&self, url: Option<&str>, size: f
         }
 
         if row_hovered {
-            actions = actions.push(
+            actions = actions.push(self.with_tooltip(
+                button(icons::icon(icons::PLAY_NEXT, 15.0, subtle))
+                    .padding(6)
+                    .style(icon_button_style(p, false))
+                    .on_press(Message::QueuePlayNext(track.clone())),
+                "Play next",
+                tooltip::Position::Top,
+            ));
+            actions = actions.push(self.with_tooltip(
                 button(icons::icon(icons::PLUS, 15.0, subtle))
                     .padding(6)
                     .style(icon_button_style(p, false))
                     .on_press(Message::QueueAddBack(track.clone())),
-            );
+                "Add to queue",
+                tooltip::Position::Top,
+            ));
         }
 
         if !track.is_local {

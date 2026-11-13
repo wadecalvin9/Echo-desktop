@@ -375,15 +375,17 @@ pub enum SettingsSection {
     LibraryMedia,
     Accounts,
     AppearanceSystem,
+    About,
 }
 
 impl SettingsSection {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::All,
         Self::AudioDsp,
         Self::LibraryMedia,
         Self::Accounts,
         Self::AppearanceSystem,
+        Self::About,
     ];
 
     pub fn label(self) -> &'static str {
@@ -393,6 +395,7 @@ impl SettingsSection {
             Self::LibraryMedia => "Library & Storage",
             Self::Accounts => "Accounts & Sync",
             Self::AppearanceSystem => "Appearance & System",
+            Self::About => "About & Credits",
         }
     }
 }
@@ -520,6 +523,7 @@ pub enum Message {
     },
     NavigateBackDetail,
     NavigateForwardDetail,
+    OpenUrl(String),
 
     // Search
     SearchQueryChanged(String),

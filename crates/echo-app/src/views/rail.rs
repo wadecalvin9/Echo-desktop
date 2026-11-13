@@ -153,12 +153,18 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                             .saturating_sub(1);
                         for (offset, line) in res.synced.iter().skip(start).take(4).enumerate() {
                             let active_line = start + offset == res.active_index(self.position_ms).unwrap_or(usize::MAX);
-                            preview_col = preview_col.push(
+                            let line_btn = button(
                                 text(if line.text.is_empty() { "♪" } else { &line.text })
-                                    .size(15)
+                                    .size(14)
                                     .font(bold())
-                                    .color(if active_line { Color::WHITE } else { muted }),
-                            );
+                                    .color(if active_line { color_from_rgb(p.primary) } else { muted })
+                                    .wrapping(Wrapping::None),
+                            )
+                            .padding([3, 6])
+                            .width(Length::Fill)
+                            .style(ghost_row_button_style(p, active_line))
+                            .on_press(Message::SeekToMs(line.time_ms));
+                            preview_col = preview_col.push(line_btn);
                         }
                     } else if let Some(plain) = &res.plain {
                         let snippet: String = plain.lines().take(4).collect::<Vec<_>>().join("\n");
@@ -540,6 +546,7 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
 
                         for (idx, item) in &context_items {
                             let idx = *idx;
+                            let is_last = idx + 1 >= total_items;
                             ctx_col = ctx_col.push(
                                 row![
                                     button(
@@ -577,6 +584,14 @@ impl EchoApp {    pub(crate) fn view_right_rail(&self) -> Element<'_, Message> {
                                     .padding([4, 6])
                                     .style(ghost_row_button_style(p, false))
                                     .on_press(Message::QueueJump(idx)),
+                                    button(icons::icon(icons::CHEVRON_UP, 13.0, muted))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueMoveUp(idx)),
+                                    button(icons::icon(icons::CHEVRON_DOWN, 13.0, if is_last { with_alpha(muted, 0.4) } else { muted }))
+                                        .padding([4, 4])
+                                        .style(icon_button_style(p, false))
+                                        .on_press(Message::QueueMoveDown(idx)),
                                     button(icons::icon(icons::CLOSE, 12.0, with_alpha(muted, 0.75)))
                                         .padding([4, 5])
                                         .style(icon_button_style(p, false))

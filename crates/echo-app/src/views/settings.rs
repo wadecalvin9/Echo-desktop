@@ -128,11 +128,12 @@ impl EchoApp {    fn settings_row<'a>(
         let section_buttons = SettingsSection::ALL.iter().map(|&sec| {
             let active = self.settings_search_query.trim().is_empty() && self.settings_section == sec;
             let (sec_icon, label, count_hint): (&'static [u8], &'static str, usize) = match sec {
-                SettingsSection::All => (icons::SETTINGS, if is_compact { "All" } else { "All Settings" }, 10),
+                SettingsSection::All => (icons::SETTINGS, if is_compact { "All" } else { "All Settings" }, 11),
                 SettingsSection::AudioDsp => (icons::SPEAKER, if is_narrow { "Audio" } else { "Audio & DSP" }, 4),
                 SettingsSection::LibraryMedia => (icons::FOLDER, if is_compact { "Library" } else { "Library & Storage" }, 2),
                 SettingsSection::Accounts => (icons::USER, if is_compact { "Accounts" } else { "Accounts & Sync" }, 2),
                 SettingsSection::AppearanceSystem => (icons::REFRESH, if is_compact { "Appearance" } else { "Appearance & System" }, 2),
+                SettingsSection::About => (icons::INFO, if is_compact { "About" } else { "About & Credits" }, 1),
             };
             button(
                 row![
@@ -1014,7 +1015,13 @@ impl EchoApp {    fn settings_row<'a>(
                         text("Manual Session Cookie Header (Advanced)").size(13).font(bold()),
                         horizontal_space(),
                         if has_cookie {
-                            text("Cookie active (stored locally)").size(11).color(color_from_rgb(p.primary))
+                            text(format!(
+                                "Connected • {} playlists, {} liked songs",
+                                self.account_playlists.len(),
+                                self.liked_tracks.len()
+                            ))
+                            .size(11)
+                            .color(color_from_rgb(p.primary))
                         } else {
                             text("Required for personal library, likes & private playlists").size(11).color(muted)
                         },
@@ -1421,6 +1428,114 @@ impl EchoApp {    fn settings_row<'a>(
         .padding(20)
         .style(settings_card_style(p));
 
+        // -----------------------------------------------------------------------------------------
+        // Card: About Echo Desktop & Creator Info
+        // -----------------------------------------------------------------------------------------
+        let about_card = container(
+            column![
+                self.settings_card_header(
+                    icons::ECHO_MARK,
+                    "About Echo Desktop",
+                    "Application version, creator profile, source repository, and releases",
+                    None,
+                ),
+                column![
+                    row![
+                        container(icons::icon(icons::ECHO_MARK, 24.0, Color::WHITE))
+                            .width(42)
+                            .height(42)
+                            .align_x(iced::alignment::Horizontal::Center)
+                            .align_y(iced::alignment::Vertical::Center)
+                            .style(card_icon_badge_style(p)),
+                        column![
+                            row![
+                                text("Echo Desktop").size(16).font(bold()),
+                                container(text("v1.0.4").size(11).font(mono()).color(color_from_rgb(p.primary)))
+                                    .padding([2, 8])
+                                    .style(badge_pill_style(p)),
+                                container(text("Pure Rust").size(10).font(semibold()).color(Color::WHITE))
+                                    .padding([2, 6])
+                                    .style(nav_tab_badge_style(p, true)),
+                            ]
+                            .spacing(8)
+                            .align_y(Alignment::Center),
+                            text("High-performance desktop YouTube Music streamer & audiophile local audio player.")
+                                .size(12)
+                                .color(muted),
+                        ]
+                        .spacing(2)
+                        .width(Length::Fill),
+                    ]
+                    .spacing(14)
+                    .align_y(Alignment::Center),
+                    container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.06)),
+                    self.settings_row(
+                        "Creator & Lead Developer",
+                        "Built with care by wadecalvin9 using Iced, Tokio, Symphonia & CPAL",
+                        row![
+                            button(
+                                row![
+                                    icons::icon(icons::GITHUB, 15.0, Color::WHITE),
+                                    text("GitHub (@wadecalvin9)").size(12).font(semibold()),
+                                ]
+                                .spacing(6)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([6, 14])
+                            .style(top_pill_button_style(p, true))
+                            .on_press(Message::OpenUrl("https://github.com/wadecalvin9".to_string())),
+                        ]
+                        .align_y(Alignment::Center)
+                        .into(),
+                    ),
+                    container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.06)),
+                    self.settings_row(
+                        "Source Code & Releases",
+                        "View official releases, binary downloads, or report issues on GitHub",
+                        row![
+                            button(
+                                row![
+                                    icons::icon(icons::GITHUB, 14.0, color_from_rgb(p.text)),
+                                    text("Repository").size(12),
+                                ]
+                                .spacing(6)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([6, 12])
+                            .style(outlined_pill_button_style(p, false))
+                            .on_press(Message::OpenUrl("https://github.com/wadecalvin9/Echo-desktop".to_string())),
+                            button(
+                                row![
+                                    icons::icon(icons::DOWNLOAD, 14.0, color_from_rgb(p.text)),
+                                    text("Releases").size(12),
+                                ]
+                                .spacing(6)
+                                .align_y(Alignment::Center),
+                            )
+                            .padding([6, 12])
+                            .style(outlined_pill_button_style(p, false))
+                            .on_press(Message::OpenUrl("https://github.com/wadecalvin9/echo-releases".to_string())),
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center)
+                        .into(),
+                    ),
+                    container(horizontal_space()).height(1).width(Length::Fill).style(divider_style(0.06)),
+                    self.settings_row(
+                        "Architecture & Technology",
+                        "Native frameless borderless shell, dynamic color theming, LRCLIB lyrics, and Shazam loopback fingerprinting",
+                        container(text("Rust Edition 2021 • GPL-3.0").size(11).font(mono()).color(muted))
+                            .padding([4, 8])
+                            .into(),
+                    ),
+                ]
+                .spacing(12),
+            ]
+            .spacing(14),
+        )
+        .padding(20)
+        .style(settings_card_style(p));
+
         // Group cards according to the selected navigation section or live search query
         let search_q = self.settings_search_query.trim().to_lowercase();
         let is_searching = !search_q.is_empty();
@@ -1465,6 +1580,9 @@ impl EchoApp {    fn settings_row<'a>(
             if matches_card(&["loudness", "repair", "replaygain", "vault", "backup", "snapshot", "echobak", "restore", "database"]) {
                 cards.push(maintenance_vault_card.into());
             }
+            if matches_card(&["about", "creator", "wadecalvin", "github", "version", "credits", "license", "releases", "developer"]) {
+                cards.push(about_card.into());
+            }
 
             if cards.is_empty() {
                 cards.push(
@@ -1501,6 +1619,7 @@ impl EchoApp {    fn settings_row<'a>(
                     cards.push(lastfm_card.into());
                     cards.push(appearance_card.into());
                     cards.push(maintenance_vault_card.into());
+                    cards.push(about_card.into());
                 }
                 SettingsSection::AudioDsp => {
                     cards.push(audio_output_card.into());
@@ -1520,6 +1639,9 @@ impl EchoApp {    fn settings_row<'a>(
                     cards.push(appearance_card.into());
                     cards.push(maintenance_vault_card.into());
                 }
+                SettingsSection::About => {
+                    cards.push(about_card.into());
+                }
             }
         }
 
@@ -1529,11 +1651,12 @@ impl EchoApp {    fn settings_row<'a>(
                 SettingsSection::ALL.iter().map(|&sec| {
                     let active = !is_searching && self.settings_section == sec;
                     let (sec_icon, label, count_hint): (&'static [u8], &'static str, usize) = match sec {
-                        SettingsSection::All => (icons::SETTINGS, "All Settings", 10),
+                        SettingsSection::All => (icons::SETTINGS, "All Settings", 11),
                         SettingsSection::AudioDsp => (icons::SPEAKER, "Audio & DSP", 4),
                         SettingsSection::LibraryMedia => (icons::FOLDER, "Library & Storage", 2),
                         SettingsSection::Accounts => (icons::USER, "Accounts & Sync", 2),
                         SettingsSection::AppearanceSystem => (icons::REFRESH, "Appearance & System", 2),
+                        SettingsSection::About => (icons::INFO, "About & Credits", 1),
                     };
                     button(
                         row![
@@ -1587,6 +1710,7 @@ impl EchoApp {    fn settings_row<'a>(
                     SettingsSection::LibraryMedia => ("Library & Storage", "Disk caching limits, downloads, and local folder indexer"),
                     SettingsSection::Accounts => ("Accounts & Sync", "Google / YouTube Music account session and Last.fm scrobbling"),
                     SettingsSection::AppearanceSystem => ("Appearance & System", "Color themes, album art extraction, and loudness snapshot vault"),
+                    SettingsSection::About => ("About & Credits", "App version, creator profile, source repository, and official releases"),
                 };
                 row![
                     column![
