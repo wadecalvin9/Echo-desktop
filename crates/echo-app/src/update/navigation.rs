@@ -340,6 +340,28 @@ impl EchoApp {
             }
             Message::WindowHandleReady(hwnd) => {
                 self.window_hwnd = hwnd;
+                #[cfg(target_os = "windows")]
+                if let Some(raw_h) = hwnd {
+                    unsafe {
+                        use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            LoadImageW, SendMessageW, IMAGE_ICON, LR_DEFAULTSIZE, LR_SHARED, WM_SETICON, ICON_BIG, ICON_SMALL,
+                        };
+                        let h_inst = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
+                        if let Ok(hicon) = LoadImageW(
+                            h_inst,
+                            windows::core::PCWSTR(1 as *const u16),
+                            IMAGE_ICON,
+                            0,
+                            0,
+                            LR_DEFAULTSIZE | LR_SHARED,
+                        ) {
+                            let win_h = HWND(raw_h as _);
+                            SendMessageW(win_h, WM_SETICON, WPARAM(ICON_BIG as _), LPARAM(hicon.0 as _));
+                            SendMessageW(win_h, WM_SETICON, WPARAM(ICON_SMALL as _), LPARAM(hicon.0 as _));
+                        }
+                    }
+                }
                 if self.smtc.is_none() {
                     self.smtc = smtc::SmtcBridge::new(hwnd);
                 }

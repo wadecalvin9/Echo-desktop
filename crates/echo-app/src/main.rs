@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod auth;
 mod dialogs;
 mod icons;
@@ -50,6 +52,13 @@ fn load_app_icon() -> Option<iced::window::Icon> {
 }
 
 pub fn main() -> iced::Result {
+    #[cfg(target_os = "windows")]
+    unsafe {
+        use windows::core::w;
+        use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+        let _ = SetCurrentProcessExplicitAppUserModelID(w!("wadecalvin9.Echo.Desktop.1"));
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()

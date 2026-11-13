@@ -10,16 +10,23 @@ fn main() {
             }
         }
 
-        let rc_file = "assets/icon.ico";
+        let rc_file = if std::path::Path::new("assets/installer_icon.ico").exists() {
+            "assets/installer_icon.ico"
+        } else {
+            "assets/icon.ico"
+        };
         if std::path::Path::new(rc_file).exists() {
             let obj_file = format!("{}/echo-app-icon.o", out_dir);
-            let windres_cmd = if std::process::Command::new("windres").arg("--version").output().is_ok() {
-                Some("windres")
-            } else if std::process::Command::new("x86_64-w64-mingw32-windres").arg("--version").output().is_ok() {
-                Some("x86_64-w64-mingw32-windres")
-            } else {
-                None
-            };
+            let candidates = [
+                r"C:\Users\Administrator\llvm-mingw-ucrt\bin\x86_64-w64-mingw32-windres.exe",
+                r"C:\Users\Administrator\llvm-mingw-ucrt\bin\llvm-windres.exe",
+                "x86_64-w64-mingw32-windres",
+                "llvm-windres",
+                "windres",
+            ];
+            let windres_cmd = candidates.iter().find(|cmd| {
+                std::process::Command::new(cmd).arg("--version").output().is_ok()
+            });
 
             if let Some(cmd) = windres_cmd {
                 if let Ok(canon) = std::fs::canonicalize(rc_file) {
