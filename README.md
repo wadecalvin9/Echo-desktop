@@ -13,7 +13,7 @@
 [![Releases](https://img.shields.io/badge/Releases-echo--releases-2ea44f?style=for-the-badge&logo=github&logoColor=white)](https://github.com/wadecalvin9/echo-releases)
 
 <p align="center">
-  <a href="https://github.com/wadecalvin9/echo-releases"><b>[ Download Latest Release ]</b></a> •
+  <a href="https://github.com/wadecalvin9/echo-releases/releases/download/v1.0.4/Echo-Desktop-Windows-x64.zip"><b>[ Download Echo Desktop (v1.0.4 Windows x64) ]</b></a> •
   <a href="#screenshots">Screenshots</a> •
   <a href="#features">Features</a> •
   <a href="#keyboard-shortcuts">Shortcuts</a> •
