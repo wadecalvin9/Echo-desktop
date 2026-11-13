@@ -17,6 +17,7 @@
   <a href="#screenshots">Screenshots</a> •
   <a href="#features">Features</a> •
   <a href="#keyboard-shortcuts">Shortcuts</a> •
+  <a href="#echo-for-android">Echo for Android</a> •
   <a href="#building-from-source">Build from Source</a> •
   <a href="#about--creator">Creator</a>
 </p>
@@ -38,22 +39,22 @@ No telemetry. No advertisements. No mandatory account logins. Just instant, bit-
 <div align="center">
 
 ### Home & Discover
-<img src="assets/screenshot_home.jpg" width="95%" alt="Echo Desktop - Home & Discover" />
+<img src="assets/desktop_home.jpg" width="95%" alt="Echo Desktop - Home & Discover" />
 
 <br/><br/>
 
 ### Now Playing & Lyrics Preview
-<img src="assets/screenshot_nowplaying.jpg" width="95%" alt="Echo Desktop - Now Playing & Queue" />
+<img src="assets/desktop_nowplaying.jpg" width="95%" alt="Echo Desktop - Now Playing & Queue" />
 
 <br/><br/>
 
 ### Expanded Synced Lyrics Stage
-<img src="assets/screenshot_lyrics.jpg" width="95%" alt="Echo Desktop - Cinema Synced Lyrics Stage" />
+<img src="assets/desktop_lyrics.jpg" width="95%" alt="Echo Desktop - Cinema Synced Lyrics Stage" />
 
 <br/><br/>
 
 ### Artist Detail & Verified Discography
-<img src="assets/screenshot_artist.jpg" width="95%" alt="Echo Desktop - Artist Detail Page" />
+<img src="assets/desktop_artist.jpg" width="95%" alt="Echo Desktop - Artist Detail Page" />
 
 </div>
 
@@ -104,6 +105,26 @@ No telemetry. No advertisements. No mandatory account logins. Just instant, bit-
   - Last.fm Now Playing & scrobbling support.
   - Windows System Media Transport Controls (SMTC) and taskbar playback progress.
   - Google Cast / Chromecast, DLNA, and FCast device streaming.
+
+---
+
+## Echo for Android
+
+Prefer listening on mobile? **Echo for Android** delivers the same lightweight, private music player experience with instant startup, swipe gestures, and true-black OLED mode:
+
+<div align="center">
+  <img src="assets/mobile_home.jpg" width="23%" alt="Echo Android - Home & Quick Picks" />
+  &nbsp;
+  <img src="assets/mobile_player.jpg" width="23%" alt="Echo Android - Now Playing" />
+  &nbsp;
+  <img src="assets/mobile_lyrics.jpg" width="23%" alt="Echo Android - Synced Lyrics" />
+  &nbsp;
+  <img src="assets/mobile_library.jpg" width="23%" alt="Echo Android - Offline Library" />
+</div>
+
+<p align="center">
+  Download the latest Android APK from the <a href="https://github.com/wadecalvin9/echo-releases"><b>echo-releases repository</b></a>.
+</p>
 
 ---
 
