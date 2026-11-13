@@ -228,6 +228,7 @@ pub(crate) struct EchoApp {
     cast_address_input: String,
     available_audio_devices: Vec<String>,
     settings_section: SettingsSection,
+    settings_search_query: String,
     playlist_filter_query: String,
     show_stream_inspector: bool,
 }
@@ -402,6 +403,7 @@ impl EchoApp {
             cast_address_input: String::new(),
             available_audio_devices,
             settings_section: SettingsSection::All,
+            settings_search_query: String::new(),
             playlist_filter_query: String::new(),
             show_stream_inspector: false,
         };

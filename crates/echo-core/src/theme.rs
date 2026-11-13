@@ -32,8 +32,8 @@ impl RgbColor {
     }
 }
 
-/// Echo's fixed default accent (Nordic Sage #5E9B78 - calm, organic, understated).
-pub const ACCENT: RgbColor = RgbColor::from_u8(94, 155, 120);
+/// Echo's fixed default accent (Oceanic Sage / Muted Acoustic Teal #3EA89E - organic, smooth, restrained).
+pub const ACCENT: RgbColor = RgbColor::from_u8(62, 168, 158);
 
 /// Derives a vivid, high-contrast accent color from an album cover seed for `ThemeMode::Dynamic`.
 /// Falls back toward [`ACCENT`] when the cover is nearly grayscale.
@@ -90,7 +90,7 @@ pub struct DynamicPalette {
 
 impl DynamicPalette {
     pub fn default_for(mode: ThemeMode) -> Self {
-        Self::from_seed(RgbColor::from_u8(84, 86, 92), mode)
+        Self::from_seed(RgbColor::from_u8(28, 64, 60), mode)
     }
 
     pub fn from_seed(seed: RgbColor, mode: ThemeMode) -> Self {
@@ -109,21 +109,21 @@ impl DynamicPalette {
         let (background, surface, surface_elevated, primary) = match mode {
             ThemeMode::OledBlack => (
                 RgbColor::from_u8(0, 0, 0),
-                RgbColor::from_u8(9, 9, 11),
-                RgbColor::from_u8(20, 20, 24),
+                RgbColor::from_u8(10, 12, 16),
+                RgbColor::from_u8(20, 24, 31),
                 ACCENT,
             ),
             ThemeMode::Dark => (
-                RgbColor::from_u8(7, 7, 9),
-                RgbColor::from_u8(18, 18, 21),
-                RgbColor::from_u8(30, 30, 35),
+                RgbColor::from_u8(8, 9, 12),
+                RgbColor::from_u8(17, 19, 24),
+                RgbColor::from_u8(28, 31, 38),
                 ACCENT,
             ),
             ThemeMode::Dynamic => {
-                let base_surface = RgbColor::from_u8(15, 15, 18);
-                let base_elevated = RgbColor::from_u8(27, 27, 32);
+                let base_surface = RgbColor::from_u8(17, 19, 24);
+                let base_elevated = RgbColor::from_u8(28, 31, 38);
                 (
-                    RgbColor::from_u8(5, 5, 7),
+                    RgbColor::from_u8(7, 8, 11),
                     base_surface.lerp(tint, 0.12),
                     base_elevated.lerp(tint, 0.18),
                     derive_dynamic_accent(seed),
@@ -136,9 +136,9 @@ impl DynamicPalette {
             surface,
             surface_elevated,
             primary,
-            text: RgbColor::from_u8(255, 255, 255),
-            text_muted: RgbColor::from_u8(167, 167, 167),
-            danger: RgbColor::from_u8(241, 94, 108),
+            text: RgbColor::from_u8(245, 247, 250),
+            text_muted: RgbColor::from_u8(142, 149, 163),
+            danger: RgbColor::from_u8(244, 88, 107),
             tint,
         }
     }

@@ -11,11 +11,11 @@ use iced::{Color, Element, Font, Length};
 
 use crate::icons;
 use crate::theme::{
-    badge_pill_style, color_from_rgb, divider_style, eq_band_strip_style,
+    badge_pill_style, card_icon_badge_style, color_from_rgb, divider_style, eq_band_strip_style,
     ghost_row_button_style, icon_button_style,
     nav_tab_badge_style, outlined_pill_button_style, pick_list_menu_style, pick_list_style,
     pill_search_input_style, scroll_style, search_field_style, segmented_pill_style,
-    settings_card_style, slim_slider_style, stat_bar_fill_style, stat_bar_track_style,
+    settings_card_style, settings_nav_item_style, slim_slider_style, stat_bar_fill_style, stat_bar_track_style,
     toggler_style, top_pill_button_style,
 };
 use crate::{
@@ -59,14 +59,19 @@ impl EchoApp {    fn settings_row<'a>(
 
     fn settings_card_header<'a>(
         &self,
-        _icon_bytes: &'static [u8],
+        icon_bytes: &'static [u8],
         title: &'static str,
         subtitle: &'static str,
         accessory: Option<Element<'a, Message>>,
     ) -> Element<'a, Message> {
         let p = self.palette;
         let muted = color_from_rgb(p.text_muted);
+        let icon_badge = container(icons::icon(icon_bytes, 16.0, color_from_rgb(p.primary)))
+            .padding(8)
+            .style(card_icon_badge_style(p));
+
         let mut r = row![
+            icon_badge,
             column![
                 text(title).size(17).font(bold()),
                 text(subtitle).size(12).color(muted),
@@ -91,8 +96,37 @@ impl EchoApp {    fn settings_row<'a>(
         let is_compact = center_w < 960.0;
         let is_narrow = center_w < 680.0;
 
+        let search_input = text_input("Search preferences, DSP, devices...", &self.settings_search_query)
+            .on_input(Message::SettingsSearchChanged)
+            .style(pill_search_input_style(p))
+            .padding([8, 14])
+            .size(12);
+
+        let search_bar = row![
+            search_input,
+            if !self.settings_search_query.is_empty() {
+                Element::from(
+                    button(
+                        row![
+                            icons::icon(icons::WIN_CLOSE, 9.0, color_from_rgb(p.primary)),
+                            text("Clear").size(11).font(bold()),
+                        ]
+                        .spacing(4)
+                        .align_y(Alignment::Center),
+                    )
+                    .padding([6, 10])
+                    .style(outlined_pill_button_style(p, false))
+                    .on_press(Message::SettingsSearchChanged(String::new())),
+                )
+            } else {
+                Element::from(horizontal_space().width(0))
+            },
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center);
+
         let section_buttons = SettingsSection::ALL.iter().map(|&sec| {
-            let active = self.settings_section == sec;
+            let active = self.settings_search_query.trim().is_empty() && self.settings_section == sec;
             let (sec_icon, label, count_hint): (&'static [u8], &'static str, usize) = match sec {
                 SettingsSection::All => (icons::SETTINGS, if is_compact { "All" } else { "All Settings" }, 10),
                 SettingsSection::AudioDsp => (icons::SPEAKER, if is_narrow { "Audio" } else { "Audio & DSP" }, 4),
@@ -130,18 +164,6 @@ impl EchoApp {    fn settings_row<'a>(
         ))
         .height(36)
         .width(Length::Fill);
-
-        let header = row![
-            column![
-                text("Settings").size(32).font(bold()),
-                text("Audio, library, playback preferences & appearance").size(13).color(muted),
-            ]
-            .spacing(2),
-            horizontal_space(),
-            pills_bar,
-        ]
-        .spacing(16)
-        .align_y(Alignment::Center);
 
         let row_divider = || -> Element<'static, Message> {
             container(horizontal_space())
@@ -1399,57 +1421,254 @@ impl EchoApp {    fn settings_row<'a>(
         .padding(20)
         .style(settings_card_style(p));
 
-        // Group cards according to the selected navigation section
+        // Group cards according to the selected navigation section or live search query
+        let search_q = self.settings_search_query.trim().to_lowercase();
+        let is_searching = !search_q.is_empty();
+
+        let matches_card = |keywords: &[&str]| -> bool {
+            if !is_searching {
+                return true;
+            }
+            keywords.iter().any(|k| k.to_lowercase().contains(&search_q))
+        };
+
         let mut cards: Vec<Element<'_, Message>> = Vec::new();
-        match self.settings_section {
-            SettingsSection::All => {
+
+        if is_searching {
+            if matches_card(&["audio", "output", "device", "playback", "speed", "transition", "crossfade", "normalization", "skip silence", "bitrate", "dac"]) {
                 cards.push(audio_output_card.into());
-                cards.push(autoeq_dsp_card.into());
-                cards.push(custom_eq_card.into());
-                cards.push(smart_features_card.into());
-                cards.push(downloads_cache_card.into());
-                cards.push(local_media_card.into());
-                cards.push(account_card.into());
-                cards.push(lastfm_card.into());
-                cards.push(appearance_card.into());
-                cards.push(maintenance_vault_card.into());
             }
-            SettingsSection::AudioDsp => {
-                cards.push(audio_output_card.into());
+            if matches_card(&["harman", "tuning", "spatial", "dsp", "autoeq", "headphone", "binaural", "room", "widening", "preset"]) {
                 cards.push(autoeq_dsp_card.into());
+            }
+            if matches_card(&["equalizer", "10-band", "graphic", "eq", "preamp", "bands", "bass", "treble", "curve"]) {
                 cards.push(custom_eq_card.into());
+            }
+            if matches_card(&["smart", "playback", "recommendations", "autoplay", "similar", "recognition", "shazam", "fingerprint", "dj"]) {
                 cards.push(smart_features_card.into());
             }
-            SettingsSection::LibraryMedia => {
+            if matches_card(&["downloads", "offline", "cache", "storage", "disk", "purge", "clear", "size", "folder"]) {
                 cards.push(downloads_cache_card.into());
+            }
+            if matches_card(&["local media", "folders", "library", "scan", "scanner", "sensitivity", "indexing", "mp3", "flac"]) {
                 cards.push(local_media_card.into());
             }
-            SettingsSection::Accounts => {
+            if matches_card(&["youtube music", "google account", "cookie", "visitor", "catalog", "region", "language", "sign-in"]) {
                 cards.push(account_card.into());
+            }
+            if matches_card(&["last.fm", "scrobbler", "now playing", "api key", "secret", "scrobble", "sync"]) {
                 cards.push(lastfm_card.into());
             }
-            SettingsSection::AppearanceSystem => {
+            if matches_card(&["appearance", "theme", "oled", "dynamic", "album art", "recognition audio input", "microphone", "loopback", "dark"]) {
                 cards.push(appearance_card.into());
+            }
+            if matches_card(&["loudness", "repair", "replaygain", "vault", "backup", "snapshot", "echobak", "restore", "database"]) {
                 cards.push(maintenance_vault_card.into());
+            }
+
+            if cards.is_empty() {
+                cards.push(
+                    container(
+                        column![
+                            icons::icon(icons::SEARCH, 28.0, color_from_rgb(p.primary)),
+                            text(format!("No settings matching \"{}\"", self.settings_search_query)).size(16).font(bold()),
+                            text("Try searching for terms like 'audio', 'harman', 'cache', 'theme', or 'last.fm'").size(12).color(muted),
+                            vertical_space().height(6),
+                            button(text("Clear Filter").size(12).font(bold()))
+                                .padding([7, 16])
+                                .style(top_pill_button_style(p, false))
+                                .on_press(Message::SettingsSearchChanged(String::new())),
+                        ]
+                        .spacing(8)
+                        .align_x(iced::alignment::Horizontal::Center)
+                    )
+                    .padding(36)
+                    .width(Length::Fill)
+                    .style(settings_card_style(p))
+                    .into()
+                );
+            }
+        } else {
+            match self.settings_section {
+                SettingsSection::All => {
+                    cards.push(audio_output_card.into());
+                    cards.push(autoeq_dsp_card.into());
+                    cards.push(custom_eq_card.into());
+                    cards.push(smart_features_card.into());
+                    cards.push(downloads_cache_card.into());
+                    cards.push(local_media_card.into());
+                    cards.push(account_card.into());
+                    cards.push(lastfm_card.into());
+                    cards.push(appearance_card.into());
+                    cards.push(maintenance_vault_card.into());
+                }
+                SettingsSection::AudioDsp => {
+                    cards.push(audio_output_card.into());
+                    cards.push(autoeq_dsp_card.into());
+                    cards.push(custom_eq_card.into());
+                    cards.push(smart_features_card.into());
+                }
+                SettingsSection::LibraryMedia => {
+                    cards.push(downloads_cache_card.into());
+                    cards.push(local_media_card.into());
+                }
+                SettingsSection::Accounts => {
+                    cards.push(account_card.into());
+                    cards.push(lastfm_card.into());
+                }
+                SettingsSection::AppearanceSystem => {
+                    cards.push(appearance_card.into());
+                    cards.push(maintenance_vault_card.into());
+                }
             }
         }
 
-        let pad_h = if self.center_width() < 720.0 { 16 } else { 28 };
-        self.vscroll(
-            container(
-                column![
-                    header,
-                    vertical_space().height(12),
-                    column(cards).spacing(22),
-                    vertical_space().height(44),
-                ]
-                .spacing(12)
-                .max_width(840),
+        if center_w >= 880.0 {
+            // Widescreen Master-Detail Layout
+            let sidebar_nav = column(
+                SettingsSection::ALL.iter().map(|&sec| {
+                    let active = !is_searching && self.settings_section == sec;
+                    let (sec_icon, label, count_hint): (&'static [u8], &'static str, usize) = match sec {
+                        SettingsSection::All => (icons::SETTINGS, "All Settings", 10),
+                        SettingsSection::AudioDsp => (icons::SPEAKER, "Audio & DSP", 4),
+                        SettingsSection::LibraryMedia => (icons::FOLDER, "Library & Storage", 2),
+                        SettingsSection::Accounts => (icons::USER, "Accounts & Sync", 2),
+                        SettingsSection::AppearanceSystem => (icons::REFRESH, "Appearance & System", 2),
+                    };
+                    button(
+                        row![
+                            icons::icon(sec_icon, 15.0, if active { color_from_rgb(p.primary) } else { muted }),
+                            text(label).size(13).font(if active { bold() } else { Font::DEFAULT }),
+                            horizontal_space(),
+                            container(text(format!("{count_hint}")).size(10).font(mono()))
+                                .padding([1, 6])
+                                .style(nav_tab_badge_style(p, active)),
+                        ]
+                        .spacing(10)
+                        .align_y(Alignment::Center)
+                        .width(Length::Fill)
+                    )
+                    .padding([9, 12])
+                    .width(Length::Fill)
+                    .style(settings_nav_item_style(p, active))
+                    .on_press(Message::SelectSettingsSection(sec))
+                    .into()
+                })
             )
+            .spacing(4);
+
+            let left_panel = column![
+                column![
+                    text("Settings").size(26).font(bold()),
+                    text("Preferences & system options").size(12).color(muted),
+                ]
+                .spacing(2),
+                search_bar,
+                sidebar_nav,
+            ]
+            .spacing(14)
+            .width(Length::Fixed(230.0));
+
+            let section_header = if is_searching {
+                row![
+                    icons::icon(icons::SEARCH, 18.0, color_from_rgb(p.primary)),
+                    text(format!("Search Results: \"{}\"", self.settings_search_query)).size(20).font(bold()),
+                    horizontal_space(),
+                    container(text(format!("{} found", cards.len())).size(11).font(mono()))
+                        .padding([2, 8])
+                        .style(badge_pill_style(p)),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center)
+            } else {
+                let (sec_title, sec_desc) = match self.settings_section {
+                    SettingsSection::All => ("All Settings", "Full overview of playback, DSP, storage, and accounts"),
+                    SettingsSection::AudioDsp => ("Audio & DSP", "Device routing, bitrates, speed adjustment, Harman AutoEQ, and spatial audio"),
+                    SettingsSection::LibraryMedia => ("Library & Storage", "Disk caching limits, downloads, and local folder indexer"),
+                    SettingsSection::Accounts => ("Accounts & Sync", "Google / YouTube Music account session and Last.fm scrobbling"),
+                    SettingsSection::AppearanceSystem => ("Appearance & System", "Color themes, album art extraction, and loudness snapshot vault"),
+                };
+                row![
+                    column![
+                        text(sec_title).size(22).font(bold()),
+                        text(sec_desc).size(12).color(muted),
+                    ]
+                    .spacing(2)
+                    .width(Length::Fill),
+                ]
+                .align_y(Alignment::Center)
+            };
+
+            let right_content = self.vscroll(
+                container(
+                    column![
+                        section_header,
+                        vertical_space().height(4),
+                        column(cards).spacing(18),
+                        vertical_space().height(36),
+                    ]
+                    .spacing(12)
+                    .max_width(780),
+                )
+                .width(Length::Fill)
+                .padding([4, 16])
+            );
+
+            container(
+                row![
+                    left_panel,
+                    container(horizontal_space())
+                        .width(1)
+                        .height(Length::Fill)
+                        .style(divider_style(0.08)),
+                    right_content,
+                ]
+                .spacing(20)
+                .height(Length::Fill)
+                .width(Length::Fill)
+            )
+            .padding([20, 24])
+            .height(Length::Fill)
             .width(Length::Fill)
-            .padding([24, pad_h])
-            .align_x(iced::alignment::Horizontal::Center),
-        )
+            .into()
+        } else {
+            // Compact Layout
+            let top_header = column![
+                row![
+                    column![
+                        text("Settings").size(28).font(bold()),
+                        text("Preferences & system options").size(12).color(muted),
+                    ]
+                    .spacing(2)
+                    .width(Length::Fill),
+                ]
+                .align_y(Alignment::Center),
+                search_bar,
+                if !is_searching {
+                    Element::from(pills_bar)
+                } else {
+                    Element::from(horizontal_space().height(0))
+                },
+            ]
+            .spacing(12);
+
+            let pad_h = if is_narrow { 12 } else { 20 };
+            self.vscroll(
+                container(
+                    column![
+                        top_header,
+                        vertical_space().height(8),
+                        column(cards).spacing(18),
+                        vertical_space().height(36),
+                    ]
+                    .spacing(12)
+                    .max_width(840),
+                )
+                .width(Length::Fill)
+                .padding([20, pad_h])
+                .align_x(iced::alignment::Horizontal::Center),
+            )
+        }
     }
 
 }

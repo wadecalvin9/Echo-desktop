@@ -796,6 +796,10 @@ impl EchoApp {
                 self.settings_section = sec;
                 Task::none()
             }
+            Message::SettingsSearchChanged(q) => {
+                self.settings_search_query = q;
+                Task::none()
+            }
             Message::ExcludeTrack(t) => {
                 if !self.settings.excluded_tracks.contains(&t.id) {
                     self.settings.excluded_tracks.push(t.id.clone());

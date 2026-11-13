@@ -704,6 +704,7 @@ pub enum Message {
     PlaybackSpeedChanged(f32),
     OutputDeviceSelected(Option<String>),
     SelectSettingsSection(SettingsSection),
+    SettingsSearchChanged(String),
 
     // Lyrics Calibration & Share
     AdjustLyricsOffset(i64),

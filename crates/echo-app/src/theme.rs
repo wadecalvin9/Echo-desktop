@@ -69,30 +69,40 @@ pub fn elevated_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::S
 
 pub fn settings_card_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
+        let accent = color_from_rgb(p.primary);
+        let top_surface = color_from_rgb(p.surface_elevated.lerp(p.tint, 0.10).lerp(p.primary, 0.04));
+        let bottom_surface = color_from_rgb(p.surface.lerp(p.surface_elevated, 0.50));
+        let grad = Linear::new(Radians(std::f32::consts::FRAC_PI_2))
+            .add_stop(0.0, with_alpha(top_surface, 0.96))
+            .add_stop(1.0, with_alpha(bottom_surface, 0.98));
+
         container::Style {
-            background: Some(Background::Color(Color::from_rgba(1.0, 1.0, 1.0, 0.035))),
+            background: Some(Background::Gradient(Gradient::Linear(grad))),
             text_color: Some(color_from_rgb(p.text)),
             border: Border {
-                color: white(0.06),
+                color: with_alpha(accent, 0.14),
                 width: 1.0,
-                radius: 12.0.into(),
+                radius: 14.0.into(),
             },
-            ..Default::default()
+            shadow: Shadow {
+                color: Color::from_rgba(0.0, 0.0, 0.0, 0.45),
+                offset: Vector::new(0.0, 4.0),
+                blur_radius: 18.0,
+            },
         }
     }
 }
 
-#[allow(dead_code)]
 pub fn card_icon_badge_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
     move |_| {
         let accent = color_from_rgb(p.primary);
         container::Style {
-            background: Some(Background::Color(with_alpha(accent, 0.14))),
+            background: Some(Background::Color(with_alpha(accent, 0.09))),
             text_color: Some(accent),
             border: Border {
-                color: with_alpha(accent, 0.28),
+                color: with_alpha(accent, 0.20),
                 width: 1.0,
-                radius: 9.0.into(),
+                radius: 10.0.into(),
             },
             ..Default::default()
         }
@@ -111,15 +121,18 @@ pub fn eq_band_strip_style(_p: DynamicPalette) -> impl Fn(&Theme) -> container::
     }
 }
 
-pub fn segmented_pill_style(_p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Color(white(0.05))),
-        border: Border {
-            color: white(0.08),
-            width: 1.0,
-            radius: 999.0.into(),
-        },
-        ..Default::default()
+pub fn segmented_pill_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
+    move |_| {
+        let accent = color_from_rgb(p.primary);
+        container::Style {
+            background: Some(Background::Color(with_alpha(color_from_rgb(p.surface_elevated), 0.75))),
+            border: Border {
+                color: with_alpha(accent, 0.18),
+                width: 1.0,
+                radius: 999.0.into(),
+            },
+            ..Default::default()
+        }
     }
 }
 
@@ -145,6 +158,46 @@ pub fn nav_tab_badge_style(p: DynamicPalette, active: bool) -> impl Fn(&Theme) -
                 },
                 ..Default::default()
             }
+        }
+    }
+}
+
+pub fn settings_nav_item_style(
+    p: DynamicPalette,
+    active: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let accent = color_from_rgb(p.primary);
+        let (bg, text_color, border_color) = if active {
+            (
+                with_alpha(accent, if hovered { 0.14 } else { 0.08 }),
+                accent,
+                with_alpha(accent, 0.22),
+            )
+        } else if hovered {
+            (
+                with_alpha(color_from_rgb(p.surface_elevated), 0.60),
+                color_from_rgb(p.text),
+                with_alpha(white(0.10), 0.5),
+            )
+        } else {
+            (
+                Color::TRANSPARENT,
+                color_from_rgb(p.text_muted),
+                Color::TRANSPARENT,
+            )
+        };
+
+        button::Style {
+            background: Some(Background::Color(bg)),
+            text_color,
+            border: Border {
+                radius: 10.0.into(),
+                width: 1.0,
+                color: border_color,
+            },
+            ..Default::default()
         }
     }
 }
@@ -395,14 +448,18 @@ pub fn skeleton_block_style(alpha: f32, radius: f32) -> impl Fn(&Theme) -> conta
 }
 
 pub fn badge_pill_style(p: DynamicPalette) -> impl Fn(&Theme) -> container::Style {
-    move |_| container::Style {
-        background: Some(Background::Color(white(0.07))),
-        text_color: Some(color_from_rgb(p.text)),
-        border: Border {
-            radius: 999.0.into(),
+    move |_| {
+        let accent = color_from_rgb(p.primary);
+        container::Style {
+            background: Some(Background::Color(with_alpha(accent, 0.08))),
+            text_color: Some(color_from_rgb(p.text)),
+            border: Border {
+                color: with_alpha(accent, 0.16),
+                width: 1.0,
+                radius: 999.0.into(),
+            },
             ..Default::default()
-        },
-        ..Default::default()
+        }
     }
 }
 
@@ -681,32 +738,29 @@ pub fn divider_style(alpha: f32) -> impl Fn(&Theme) -> container::Style {
 // Buttons
 // ---------------------------------------------------------------------------------------------
 
-/// Chips: selected chip is high-contrast crisp white, inactive chips have frosted glass borders.
+/// Chips: selected chip has soft luminous frosted lighting, inactive chips have frosted glass borders.
 pub fn top_pill_button_style(
-    _p: DynamicPalette,
+    p: DynamicPalette,
     active: bool,
 ) -> impl Fn(&Theme, button::Status) -> button::Style {
     move |_, status| {
         let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let accent = color_from_rgb(p.primary);
         let (bg, fg, border_color) = if active {
             (
-                if hovered {
-                    Color::from_rgb(0.92, 0.92, 0.92)
-                } else {
-                    Color::WHITE
-                },
-                Color::BLACK,
-                white(0.0),
+                with_alpha(accent, if hovered { 0.24 } else { 0.16 }),
+                Color::from_rgb(0.96, 0.98, 0.98),
+                with_alpha(accent, if hovered { 0.55 } else { 0.38 }),
             )
         } else {
             (
-                white(if hovered { 0.16 } else { 0.08 }),
+                with_alpha(color_from_rgb(p.surface_elevated), if hovered { 0.85 } else { 0.50 }),
                 if hovered {
                     Color::WHITE
                 } else {
-                    white(0.90)
+                    color_from_rgb(p.text_muted)
                 },
-                white(if hovered { 0.22 } else { 0.10 }),
+                if hovered { with_alpha(accent, 0.30) } else { white(0.07) },
             )
         };
         button::Style {
@@ -714,10 +768,18 @@ pub fn top_pill_button_style(
             text_color: fg,
             border: Border {
                 radius: 999.0.into(),
-                width: if active { 0.0 } else { 1.0 },
+                width: 1.0,
                 color: border_color,
             },
-            ..Default::default()
+            shadow: if active {
+                Shadow {
+                    color: with_alpha(accent, 0.16),
+                    offset: Vector::new(0.0, 2.0),
+                    blur_radius: 8.0,
+                }
+            } else {
+                Shadow::default()
+            },
         }
     }
 }
@@ -1052,13 +1114,14 @@ pub fn pill_search_input_style(
     p: DynamicPalette,
 ) -> impl Fn(&Theme, text_input::Status) -> text_input::Style {
     move |_, status| {
+        let accent = color_from_rgb(p.primary);
         let border_color = match status {
-            text_input::Status::Focused => Color::WHITE,
-            text_input::Status::Hovered => white(0.35),
-            _ => Color::TRANSPARENT,
+            text_input::Status::Focused => with_alpha(accent, 0.75),
+            text_input::Status::Hovered => with_alpha(accent, 0.35),
+            _ => with_alpha(white(0.10), 0.8),
         };
         text_input::Style {
-            background: Background::Color(Color::from_rgb(0.141, 0.141, 0.141)),
+            background: Background::Color(with_alpha(color_from_rgb(p.surface_elevated), 0.85)),
             border: Border {
                 color: border_color,
                 width: 1.0,
@@ -1067,7 +1130,7 @@ pub fn pill_search_input_style(
             icon: color_from_rgb(p.text_muted),
             placeholder: color_from_rgb(p.text_muted),
             value: color_from_rgb(p.text),
-            selection: with_alpha(color_from_rgb(p.primary), 0.35),
+            selection: with_alpha(accent, 0.25),
         }
     }
 }
@@ -1240,39 +1303,47 @@ pub fn pick_list_style(
 ) -> impl Fn(&Theme, pick_list::Status) -> pick_list::Style {
     move |_, status| {
         let hovered = matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened);
+        let accent = color_from_rgb(p.primary);
         pick_list::Style {
             text_color: color_from_rgb(p.text),
             placeholder_color: color_from_rgb(p.text_muted),
             handle_color: if hovered {
-                Color::WHITE
+                accent
             } else {
                 color_from_rgb(p.text_muted)
             },
             background: Background::Color(if hovered {
-                white(0.14)
+                with_alpha(color_from_rgb(p.surface_elevated.lerp(p.primary, 0.06)), 0.95)
             } else {
-                white(0.09)
+                with_alpha(color_from_rgb(p.surface_elevated), 0.85)
             }),
             border: Border {
-                radius: 999.0.into(),
+                radius: 10.0.into(),
                 width: 1.0,
-                color: if hovered { white(0.28) } else { white(0.12) },
+                color: if hovered {
+                    with_alpha(accent, 0.38)
+                } else {
+                    with_alpha(white(0.12), 0.8)
+                },
             },
         }
     }
 }
 
 pub fn pick_list_menu_style(p: DynamicPalette) -> impl Fn(&Theme) -> menu::Style {
-    move |_| menu::Style {
-        background: Background::Color(Color::from_rgb(0.13, 0.13, 0.15)),
-        border: Border {
-            width: 1.0,
-            radius: 10.0.into(),
-            color: white(0.12),
-        },
-        text_color: color_from_rgb(p.text),
-        selected_text_color: Color::BLACK,
-        selected_background: Background::Color(color_from_rgb(p.primary)),
+    move |_| {
+        let accent = color_from_rgb(p.primary);
+        menu::Style {
+            background: Background::Color(color_from_rgb(p.surface_elevated)),
+            border: Border {
+                width: 1.0,
+                radius: 12.0.into(),
+                color: with_alpha(accent, 0.30),
+            },
+            text_color: color_from_rgb(p.text),
+            selected_text_color: Color::BLACK,
+            selected_background: Background::Color(accent),
+        }
     }
 }
 
